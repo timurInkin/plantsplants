@@ -55,7 +55,7 @@ amvera.yml      как Amvera собирает и запускает бота
 | `PUBLIC_URL` | домен из шага 2, с `https://` |
 | `SUPABASE_URL` | Project URL из Supabase |
 | `SUPABASE_SERVICE_KEY` | ключ service_role |
-| `LLM_API_KEY` | токен из раздела LLM в Amvera |
+| `LLM_API_KEY` | токен из раздела LLM в Amvera (необязательно: без него не работает только сканер) |
 
 Необязательные: `LLM_MODEL` (по умолчанию `gpt-4.1`), `LLM_BASE_URL` (по умолчанию инференс Amvera; подойдёт любой OpenAI-совместимый адрес), `PORT` (по умолчанию 80).
 

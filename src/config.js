@@ -8,7 +8,8 @@ export const config = {
   supabaseKey: need('SUPABASE_SERVICE_KEY'),
   // Сканер: любой OpenAI-совместимый API с поддержкой картинок. По умолчанию LLM от Amvera.
   llmBaseUrl: (process.env.LLM_BASE_URL || 'https://inference.waw0.amvera.ru/v1').replace(/\/+$/, ''),
-  llmApiKey: need('LLM_API_KEY'),
+  // Без ключа бот работает, только сканер отвечает, что пока не подключён.
+  llmApiKey: process.env.LLM_API_KEY || '',
   llmModel: process.env.LLM_MODEL || 'gpt-4.1',
   port: Number(process.env.PORT) || 80,
 };

@@ -50,6 +50,7 @@ export function normalizeScan(r) {
 }
 
 export async function scanPhoto(bytes) {
+  if (!config.llmApiKey) throw new Error('Сканер пока не подключён. Полив и напоминалки работают.');
   const res = await fetch(config.llmBaseUrl + '/chat/completions', {
     method: 'POST',
     headers: { Authorization: 'Bearer ' + config.llmApiKey, 'Content-Type': 'application/json' },
