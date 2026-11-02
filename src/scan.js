@@ -65,10 +65,11 @@ ${SCHEMA}`;
 const cut = (s, n) => String(s || '').trim().slice(0, n);
 const oneOf = (v, list, d) => (list.includes(v) ? v : d);
 
-function parseLooseJSON(text) {
+// Ищем JSON в тексте: модель может обернуть его в ```json или добавить слова до и после.
+function findJSON(text) {
   const m = String(text || '').match(/\{[\s\S]*\}/);
-  if (!m) throw new Error('Сканер ответил непонятно, попробуй ещё раз');
-  return JSON.parse(m[0]);
+  if (!m) return null;
+  try { return JSON.parse(m[0]); } catch { return null; }
 }
 
 export function normalizeScan(r) {
@@ -89,15 +90,12 @@ export function normalizeScan(r) {
   };
 }
 
-// Достаём текст ответа. Модели с «размышлениями» иногда кладут всё в reasoning, а content оставляют пустым,
-// а некоторые отдают content списком кусочков.
-function replyText(message) {
-  const c = message?.content;
-  const text = Array.isArray(c) ? c.map((part) => part?.text || '').join('') : c || '';
-  return text.trim() || String(message?.reasoning || '').trim();
+function partsText(c) {
+  return (Array.isArray(c) ? c.map((part) => part?.text || '').join('') : c || '').trim();
 }
 
-async function chat(model, content, maxTokens) {
+// Запрос к модели. Возвращает основной ответ и «размышления»: модели с размышлениями иногда кладут ответ туда.
+async function chat(model, content, { maxTokens, json = false } = {}) {
   const res = await fetch(config.llmBaseUrl + '/chat/completions', {
     method: 'POST',
     headers: {
@@ -105,7 +103,11 @@ async function chat(model, content, maxTokens) {
       'Content-Type': 'application/json',
       'X-Title': 'plantsplants',
     },
-    body: JSON.stringify({ model, max_tokens: maxTokens, temperature: 0.2, messages: [{ role: 'user', content }] }),
+    body: JSON.stringify({
+      model, max_tokens: maxTokens, temperature: 0.2,
+      messages: [{ role: 'user', content }],
+      ...(json ? { response_format: { type: 'json_object' } } : {}),
+    }),
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok || data.error) {
@@ -113,22 +115,48 @@ async function chat(model, content, maxTokens) {
     throw new Error('Сканер сейчас недоступен: ' + (data.error?.message || res.status));
   }
   const choice = data.choices?.[0];
-  const text = replyText(choice?.message);
+  return {
+    text: partsText(choice?.message?.content),
+    reasoning: String(choice?.message?.reasoning || '').trim(),
+    finish: choice?.finish_reason || '',
+    raw: data,
+  };
+}
+
+// Описание фото: берём ответ, а если он пустой — размышления.
+async function look(content) {
+  const r = await chat(config.llmVisionModel, content, { maxTokens: 12000 });
+  const text = r.text || r.reasoning;
   if (!text) {
-    console.error('Сканер: пустой ответ от', model, JSON.stringify(data).slice(0, 1000));
-    throw new Error(`Сканер ответил пустотой (${model}, ${choice?.finish_reason || 'без причины'}), попробуй ещё раз`);
+    console.error('Сканер: пустой ответ от', config.llmVisionModel, JSON.stringify(r.raw).slice(0, 1500));
+    throw new Error(`Сканер ответил пустотой (${r.finish || 'без причины'}), попробуй ещё раз`);
   }
   return text;
+}
+
+// Вывод по схеме. Если JSON не нашёлся, переспрашиваем один раз построже.
+async function verdict(model, content) {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const r = await chat(model, attempt === 0 ? content : withStrict(content), { maxTokens: 12000, json: true });
+    const parsed = findJSON(r.text) || findJSON(r.reasoning);
+    if (parsed) return normalizeScan(parsed);
+    console.error(`Сканер: нет JSON от ${model} (попытка ${attempt + 1}, ${r.finish})`, JSON.stringify(r.raw).slice(0, 1500));
+  }
+  throw new Error('Сканер ответил непонятно, попробуй ещё раз');
+}
+
+const STRICT = '\n\nВажно: в ответе должен быть только один JSON-объект по схеме выше, без размышлений и текста вокруг.';
+function withStrict(content) {
+  if (typeof content === 'string') return content + STRICT;
+  return content.map((part) => (part.type === 'text' ? { ...part, text: part.text + STRICT } : part));
 }
 
 export async function scanPhoto(bytes) {
   if (!config.llmApiKey) throw new Error('Сканер пока не подключён. Полив и напоминалки работают.');
   const image = { type: 'image_url', image_url: { url: 'data:image/jpeg;base64,' + Buffer.from(bytes).toString('base64') } };
-  if (!config.llmTextModel) {
-    return normalizeScan(parseLooseJSON(await chat(config.llmVisionModel, [{ type: 'text', text: SCAN_PROMPT }, image], 4000)));
-  }
-  const seen = await chat(config.llmVisionModel, [{ type: 'text', text: LOOK_PROMPT }, image], 3000);
-  return normalizeScan(parseLooseJSON(await chat(config.llmTextModel, ADVISE_PROMPT(seen), 4000)));
+  if (!config.llmTextModel) return verdict(config.llmVisionModel, [{ type: 'text', text: SCAN_PROMPT }, image]);
+  const seen = await look([{ type: 'text', text: LOOK_PROMPT }, image]);
+  return verdict(config.llmTextModel, ADVISE_PROMPT(seen));
 }
 
 const STATUS = { ok: 'всё ок', watch: 'присмотреться', help: 'подлечить' };
