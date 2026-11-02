@@ -1,13 +1,26 @@
 -- Выполнить один раз в Supabase: SQL Editor → New query → вставить всё → Run.
+-- Бот многопользовательский: у каждого человека в Telegram свои цветы.
+
+create table if not exists users (
+  id bigint primary key,              -- id человека в Telegram
+  chat_id bigint not null,            -- куда слать напоминалки
+  name text,
+  pending_scan jsonb,                 -- последний скан, который ещё не сохранили
+  reminded_morning date,
+  reminded_evening date,
+  created_at timestamptz not null default now()
+);
 
 create table if not exists plants (
   id text primary key,
+  user_id bigint references users(id) on delete cascade,
   name text not null,
   every int not null default 7 check (every between 1 and 60),
   scan jsonb,
   photo_path text,
   created_at timestamptz not null default now()
 );
+create index if not exists plants_user_id on plants(user_id);
 
 create table if not exists waterings (
   plant_id text not null references plants(id) on delete cascade,
@@ -15,31 +28,11 @@ create table if not exists waterings (
   primary key (plant_id, day)
 );
 
-create table if not exists kv (
-  key text primary key,
-  value jsonb
-);
-
 -- Доступ только у сервера (по секретному ключу service_role), снаружи таблицы закрыты.
+alter table users enable row level security;
 alter table plants enable row level security;
 alter table waterings enable row level security;
-alter table kv enable row level security;
 
 -- Публичная корзина для фото цветов.
 insert into storage.buckets (id, name, public) values ('photos', 'photos', true)
-on conflict (id) do nothing;
-
--- Стартовая коллекция. Дальше цветы добавляются сканером.
-insert into plants (id, name, every, created_at) values
-  ('monstera1', 'Монстера №1', 3, now()),
-  ('monstera2', 'Монстера №2', 3, now() + interval '1 second'),
-  ('pinkprince', 'Филодендрон «Розовый принц»', 3, now() + interval '2 seconds'),
-  ('philodendron', 'Филодендрон', 3, now() + interval '3 seconds'),
-  ('violets', 'Фиалки', 3, now() + interval '4 seconds'),
-  ('maranta', 'Маранта', 3, now() + interval '5 seconds'),
-  ('caladium', 'Каладиумы', 3, now() + interval '6 seconds'),
-  ('alocasia', 'Алоказия', 4, now() + interval '7 seconds'),
-  ('strelitzia', 'Стрелиция', 5, now() + interval '8 seconds'),
-  ('aglaonema', 'Аглаонема', 7, now() + interval '9 seconds'),
-  ('ficus', 'Фикус эластика', 7, now() + interval '10 seconds')
 on conflict (id) do nothing;

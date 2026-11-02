@@ -2,7 +2,6 @@
 
 import crypto from 'node:crypto';
 import { config } from './config.js';
-import { getValue } from './db.js';
 
 export async function tg(method, body) {
   const res = await fetch(`https://api.telegram.org/bot${config.botToken}/${method}`, {
@@ -34,16 +33,16 @@ export async function setupTelegram() {
 }
 
 // https://core.telegram.org/bots/webapps#validating-data-received-via-the-mini-app
-export async function isOwnerRequest(initData) {
+// Возвращает Telegram-пользователя, который открыл приложение, или null, если подпись не сходится.
+export function userFromInitData(initData) {
   const params = new URLSearchParams(initData || '');
   const hash = params.get('hash');
-  if (!hash) return false;
+  if (!hash) return null;
   params.delete('hash');
   const check = [...params.entries()].map(([k, v]) => `${k}=${v}`).sort().join('\n');
   const secret = crypto.createHmac('sha256', 'WebAppData').update(config.botToken).digest();
   const sig = crypto.createHmac('sha256', secret).update(check).digest('hex');
-  if (sig !== hash) return false;
+  if (sig.length !== hash.length || !crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(hash))) return null;
   const user = JSON.parse(params.get('user') || '{}');
-  const owner = await getValue('owner');
-  return owner != null && String(user.id) === String(owner);
+  return user.id ? user : null;
 }
