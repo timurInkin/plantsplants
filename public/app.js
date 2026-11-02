@@ -75,6 +75,7 @@ function app() {
   function scanFacts(s) {
     return '<ul class="facts">' +
       fact('eco', s.statusText || STATUS[s.status][0]) +
+      (s.why ? fact('search', s.why) : '') +
       (s.pot !== 'unknown' ? fact('potted_plant', s.potText || POT[s.pot][0]) : '') +
       fact('water_drop', 'раз в ' + days(s.every) + (s.waterText ? ', ' + s.waterText : '')) +
       (s.light ? fact('light_mode', s.light) : '') + '</ul>';
