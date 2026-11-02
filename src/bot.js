@@ -3,9 +3,22 @@
 
 import { EVENING_NUDGE } from './config.js';
 import { todayLocal } from './dates.js';
-import { touchUser, getUser, getPlants, keepPending, savePending, waterAllDue, buildState } from './db.js';
+import { touchUser, getUser, getPlants, keepPending, pendingImages, savePending, waterAllDue, buildState, MAX_SCAN_PHOTOS } from './db.js';
 import { scanPhoto, scanText } from './scan.js';
 import { tg, downloadFile, appButton } from './telegram.js';
+
+// Скан с учётом досланных фото. Новое фото добавляется к прошлому скану, если бот сам просил доснять
+// (в течение 30 минут) или если фото пришли подряд, пачкой (в течение 2 минут). more — явно «это дополнение».
+export async function scanForUser(uid, bytes, note = '', more = false) {
+  const prev = (await getUser(uid))?.pending_scan;
+  const age = prev?.at ? Date.now() - prev.at : Infinity;
+  const join = prev?.photos > 0 && prev.photos < MAX_SCAN_PHOTOS &&
+    (more || (prev.needPhotos?.length && age < 30 * 60_000) || age < 2 * 60_000);
+  const images = join ? [...(await pendingImages(uid, prev.photos)), bytes] : [bytes];
+  const scan = await scanPhoto(images, note);
+  await keepPending(uid, images, scan);
+  return { scan, photos: images.length };
+}
 
 async function handleCallback(cb) {
   if (!cb.data || !cb.message) return;
@@ -40,14 +53,13 @@ export async function handleUpdate(update) {
     await tg('sendChatAction', { chat_id: msg.chat.id, action: 'typing' });
     const size = msg.photo.find((ph) => ph.width >= 1000) || msg.photo[msg.photo.length - 1];
     const bytes = await downloadFile(size.file_id);
-    let scan;
+    let scan, photos;
     try {
-      scan = await scanPhoto(bytes);
+      ({ scan, photos } = await scanForUser(uid, bytes, msg.caption));
     } catch (e) {
       await tg('sendMessage', { chat_id: msg.chat.id, text: 'Не получилось разглядеть 😕 ' + e.message });
       return;
     }
-    await keepPending(uid, bytes, scan);
     const plants = await getPlants(uid);
     const rows = [[{ text: '＋ Это новый цветок', callback_data: 'sc:new' }]];
     for (let i = 0; i < plants.length; i += 2) {
@@ -55,7 +67,7 @@ export async function handleUpdate(update) {
     }
     await tg('sendMessage', {
       chat_id: msg.chat.id, parse_mode: 'HTML',
-      text: scanText(scan) + (plants.length ? '\n\nКуда сохранить?' : '\n\nСохранить в твои цветы?'),
+      text: (photos > 1 ? `Смотрю на все ${photos} фото вместе.\n\n` : '') + scanText(scan) + (plants.length ? '\n\nКуда сохранить?' : '\n\nСохранить в твои цветы?'),
       reply_markup: { inline_keyboard: rows },
     });
     return;

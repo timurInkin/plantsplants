@@ -14,6 +14,9 @@ export const config = {
   llmVisionModel: process.env.LLM_VISION_MODEL || process.env.LLM_MODEL || 'deepseek/deepseek-v4-flash-vision-exp',
   // Модель, которая по описанию фото пишет вывод и советы. Пустая строка — всё делает модель для фото.
   llmTextModel: process.env.LLM_TEXT_MODEL ?? '~deepseek/deepseek-v4-flash-latest',
+  // Специализированная модель по растениям Plant.id (kindwise.com): определение вида и болезней.
+  // Необязательно: без ключа бот обходится общими моделями.
+  plantIdApiKey: process.env.PLANT_ID_API_KEY || '',
   port: Number(process.env.PORT) || 80,
 };
 

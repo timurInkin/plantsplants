@@ -186,7 +186,7 @@ function app() {
     let h = '<div class="topbar"><button class="circle" data-action="scan-reset">' + ms('close') + '</button></div>';
     h += '<section class="hero-photo"><span class="photo"><img src="' + scan.preview + '" alt=""></span>' +
       (scan.status === 'loading' ? '<span class="scanning"><i></i></span>' : '') + '</section>';
-    if (scan.status === 'loading') return h + headline('Смотрю…', 'пара секунд');
+    if (scan.status === 'loading') return h + headline('Смотрю…', scanMore ? 'вместе с прошлыми фото' : 'пара секунд');
     if (scan.status === 'error') {
       return h + headline('Не получилось', scan.error) + '<button class="pill" data-action="shoot"><span>Сфоткать ещё раз</span><i>' + ms('photo_camera') + '</i></button>';
     }
@@ -194,6 +194,12 @@ function app() {
     h += headline(s.name, s.latin) + scanChips(s);
     if (s.confidence === 'low') h += '<p class="note">Не до конца уверена, что это он. Можно сфоткать поближе.</p>';
     h += '<section class="card">' + scanFacts(s) + '</section>' + todoCard(s);
+    if (s.needPhotos && s.needPhotos.length) {
+      h += '<section class="card"><div class="card-head"><div><h3>Чтобы ответить точнее</h3><p>' +
+        (scan.photos > 1 ? 'учла ' + scan.photos + ' фото, ' : '') + 'сфоткай ещё</p></div></div><ul class="facts">' +
+        s.needPhotos.map((t) => fact('add_a_photo', t)).join('') + '</ul>' +
+        '<button class="pill" data-action="shoot-more"><span>Доснять</span><i>' + ms('photo_camera') + '</i></button></section>';
+    }
     const target = scan.target && byId(scan.target);
     if (target) {
       h += '<button class="pill" data-save="' + target.id + '"><span>Сохранить в «' + esc(target.name) + '»</span><i>' + ms('check') + '</i></button>';
@@ -253,6 +259,7 @@ function app() {
   camera.type = 'file'; camera.accept = 'image/*'; camera.hidden = true;
   document.body.appendChild(camera);
   let scanTarget = null;
+  let scanMore = false;     // досылаем фото к текущему скану
 
   camera.addEventListener('change', async () => {
     const file = camera.files[0];
@@ -262,16 +269,17 @@ function app() {
       const img = await shrink(file);
       scan = { status: 'loading', preview: img.preview, target: scanTarget };
       go('scan');
-      const res = await api('/api/scan', img.blob, true);
-      scan = { ...scan, status: 'done', result: res.scan };
+      const res = await api('/api/scan' + (scanMore ? '?more=1' : ''), img.blob, true);
+      scan = { ...scan, status: 'done', result: res.scan, photos: res.photos || 1 };
     } catch (e) {
       scan = { ...(scan || {}), status: 'error', error: e.message };
     }
     if (route === 'scan') render();
   });
 
-  function shoot(target) {
+  function shoot(target, more) {
     scanTarget = target || null;
+    scanMore = !!more;
     camera.click();
   }
 
@@ -304,6 +312,7 @@ function app() {
       return;
     }
     if (d.action === 'shoot') return shoot(scan && scan.target);
+    if (d.action === 'shoot-more') return shoot(scan && scan.target, true);
     if (d.action === 'scan-reset') { scan = null; return go('scan'); }
     if (d.action === 'water-all') { haptic(); return act(() => api('/api/water-all', {})); }
   });

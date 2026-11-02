@@ -5,9 +5,8 @@ import fs from 'node:fs/promises';
 import { config, MORNING_HOUR, EVENING_HOUR } from './config.js';
 import { todayLocal, hourLocal } from './dates.js';
 import * as db from './db.js';
-import { scanPhoto } from './scan.js';
 import { setupTelegram, webhookSecret, userFromInitData } from './telegram.js';
-import { handleUpdate, remind } from './bot.js';
+import { handleUpdate, remind, scanForUser } from './bot.js';
 
 const STATIC = {
   '/': ['index.html', 'text/html; charset=utf-8'],
@@ -40,9 +39,9 @@ async function api(uid, path, req) {
   if (path === '/api/scan') {
     const bytes = await readBody(req, 4_000_000);
     if (!bytes.length) throw new Error('Пустое фото');
-    const scan = await scanPhoto(bytes);
-    await db.keepPending(uid, bytes, scan);
-    return { scan };
+    const more = new URL(req.url, 'http://x').searchParams.get('more') === '1';
+    const { scan, photos } = await scanForUser(uid, bytes, '', more);
+    return { scan, photos };
   }
 
   const body = JSON.parse((await readBody(req, 100_000)).toString() || '{}');

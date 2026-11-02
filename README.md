@@ -16,6 +16,7 @@
 | База: цветы, поливы, служебные значения | [Supabase](https://supabase.com), таблицы `plants`, `waterings`, `kv` |
 | Фото цветов | Supabase Storage, бакет `photos` |
 | Сканер: одна модель смотрит на фото, вторая пишет вывод и советы | [OpenRouter](https://openrouter.ai) |
+| Специализированная модель по растениям (вид и болезни), подсказка сканеру | [Plant.id](https://www.kindwise.com/plant-id), необязательно |
 
 ```
 src/
@@ -57,7 +58,7 @@ amvera.yml      как Amvera собирает и запускает бота
 | `SUPABASE_SERVICE_KEY` | ключ service_role |
 | `LLM_API_KEY` | ключ OpenRouter (необязательно: без него не работает только сканер) |
 
-Необязательные: `LLM_VISION_MODEL` — модель, которая смотрит на фото (по умолчанию `deepseek/deepseek-v4-flash-vision-exp`); `LLM_TEXT_MODEL` — модель, которая по описанию фото пишет вывод и советы (по умолчанию `~deepseek/deepseek-v4-flash-latest`, пустое значение — всё делает модель для фото); `LLM_BASE_URL` (по умолчанию `https://openrouter.ai/api/v1`, подойдёт любой OpenAI-совместимый адрес); `PORT` (по умолчанию 80).
+Необязательные: `LLM_VISION_MODEL` — модель, которая смотрит на фото (по умолчанию `deepseek/deepseek-v4-flash-vision-exp`); `LLM_TEXT_MODEL` — модель, которая по описанию фото пишет вывод и советы (по умолчанию `~deepseek/deepseek-v4-flash-latest`, пустое значение — всё делает модель для фото); `LLM_BASE_URL` (по умолчанию `https://openrouter.ai/api/v1`, подойдёт любой OpenAI-совместимый адрес); `PLANT_ID_API_KEY` — ключ Plant.id: с ним сканер сначала спрашивает специализированную модель по растениям и сверяет с ней вид и болезни; `PORT` (по умолчанию 80).
 
 4. Перезапустить проект. При старте бот сам подключает вебхук и кнопку «Мои цветы». В логах должно появиться «Telegram подключён».
 5. Написать боту `/start`.

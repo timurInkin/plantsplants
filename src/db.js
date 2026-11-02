@@ -111,18 +111,34 @@ export function photoUrl(path) {
   return supabase.storage.from(PHOTO_BUCKET).getPublicUrl(path).data.publicUrl;
 }
 
-const pendingPath = (uid) => `pending/${uid}.jpg`;
-
 // Последний скан ждёт, пока его сохранят: в новый цветок или в существующий. У каждого человека свой.
-export async function keepPending(uid, bytes, scan) {
-  check(await supabase.storage.from(PHOTO_BUCKET).upload(pendingPath(uid), bytes, { contentType: 'image/jpeg', upsert: true }));
-  await updateUser(uid, { pending_scan: scan });
+// Фото к нему может быть несколько (бот просил доснять), лежат как pending/<id>-0.jpg, -1, -2…
+export const MAX_SCAN_PHOTOS = 4;
+const pendingPath = (uid, i) => `pending/${uid}-${i}.jpg`;
+
+export async function keepPending(uid, images, scan) {
+  const bucket = supabase.storage.from(PHOTO_BUCKET);
+  for (let i = 0; i < images.length; i++) {
+    check(await bucket.upload(pendingPath(uid, i), images[i], { contentType: 'image/jpeg', upsert: true }));
+  }
+  await updateUser(uid, { pending_scan: { ...scan, photos: images.length, at: Date.now() } });
+}
+
+// Фото незавершённого скана, чтобы досланное фото разобрать вместе с ними.
+export async function pendingImages(uid, count) {
+  const out = [];
+  for (let i = 0; i < count; i++) {
+    const { data, error } = await supabase.storage.from(PHOTO_BUCKET).download(pendingPath(uid, i));
+    if (error || !data) break;
+    out.push(Buffer.from(await data.arrayBuffer()));
+  }
+  return out;
 }
 
 export async function savePending(uid, target) {
   const user = await getUser(uid);
-  const scan = user?.pending_scan;
-  if (!scan) throw Object.assign(new Error('Скан потерялся, сфоткай ещё раз'), { status: 400 });
+  const { photos, at, ...scan } = user?.pending_scan || {};
+  if (!scan.name) throw Object.assign(new Error('Скан потерялся, сфоткай ещё раз'), { status: 400 });
   let plant;
   if (target === 'new') {
     plant = await addPlant(uid, { name: scan.name, every: scan.every, scan });
@@ -132,7 +148,7 @@ export async function savePending(uid, target) {
   }
   // Имя файла новое при каждом скане, чтобы телефон не показывал старое фото из кэша.
   const path = `${uid}/${plant.id}-${Date.now().toString(36)}.jpg`;
-  check(await supabase.storage.from(PHOTO_BUCKET).copy(pendingPath(uid), path));
+  check(await supabase.storage.from(PHOTO_BUCKET).copy(pendingPath(uid, 0), path));
   if (plant.photo_path) await supabase.storage.from(PHOTO_BUCKET).remove([plant.photo_path]);
   await updatePlant(uid, plant.id, { scan, photo_path: path });
   await updateUser(uid, { pending_scan: null });
