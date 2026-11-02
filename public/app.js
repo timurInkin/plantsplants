@@ -78,7 +78,8 @@ function app() {
       (s.why ? fact('search', s.why) : '') +
       (s.pot !== 'unknown' ? fact('potted_plant', s.potText || POT[s.pot][0]) : '') +
       fact('water_drop', 'раз в ' + days(s.every) + (s.waterText ? ', ' + s.waterText : '')) +
-      (s.light ? fact('light_mode', s.light) : '') + '</ul>';
+      (s.light ? fact('light_mode', s.light) : '') +
+      (s.identified ? fact('biotech', 'вид по ' + s.identified.source + ': ' + s.identified.latin + ', ' + Math.round(s.identified.score * 100) + '%') : '') + '</ul>';
   }
 
   function scanChips(s) {

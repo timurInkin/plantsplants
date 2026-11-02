@@ -2,7 +2,7 @@
 
 import { config } from './config.js';
 import { todayLocal } from './dates.js';
-import { askPlantId } from './plantid.js';
+import { lookUpReferences } from './references.js';
 
 // Роль для обеих моделей: специалист, который смотрит на растение как ботаник и фитопатолог,
 // но отвечает коротко и по делу, без лекций.
@@ -156,13 +156,10 @@ function withStrict(content) {
   return content.map((part) => (part.type === 'text' ? { ...part, text: part.text + STRICT } : part));
 }
 
-// Подсказки к промпту: ответ специализированной модели и комментарий человека к фото.
-function extras(specialist, note) {
+// Подсказки к промпту: справочные сервисы и комментарий человека к фото.
+function extras(references, note) {
   let t = '';
-  if (specialist) {
-    t += `\nСпециализированная модель по растениям (Plant.id) по этим фото считает так:\n${specialist}\n` +
-      'Это сильная подсказка по виду и болезням, но сверь её с признаками на фото. Если признаки явно против, доверяй признакам.\n';
-  }
+  if (references) t += `\nСправочные данные по этим фото:\n${references}\n`;
   if (note) t += `\nХозяйка растения пишет: «${String(note).slice(0, 500)}». Учти это.\n`;
   return t;
 }
@@ -172,11 +169,18 @@ export async function scanPhoto(images, note = '') {
   if (!config.llmApiKey) throw new Error('Сканер пока не подключён. Полив и напоминалки работают.');
   images = [].concat(images);
   const pics = images.map((b) => ({ type: 'image_url', image_url: { url: 'data:image/jpeg;base64,' + Buffer.from(b).toString('base64') } }));
-  const specialist = await askPlantId(images);
-  const extra = extras(specialist, note);
-  if (!config.llmTextModel) return verdict(config.llmVisionModel, [{ type: 'text', text: SCAN_PROMPT + extra }, ...pics]);
-  const seen = await look([{ type: 'text', text: LOOK_PROMPT + extra }, ...pics]);
-  return verdict(config.llmTextModel, ADVISE_PROMPT(seen, extra));
+  const refs = await lookUpReferences(images);
+  const extra = extras(refs.text, note);
+  const scan = !config.llmTextModel
+    ? await verdict(config.llmVisionModel, [{ type: 'text', text: SCAN_PROMPT + extra }, ...pics])
+    : await verdict(config.llmTextModel, ADVISE_PROMPT(await look([{ type: 'text', text: LOOK_PROMPT + extra }, ...pics]), extra));
+  if (refs.identified) scan.identified = refs.identified;
+  // Полив держим в разумных пределах справочника: модель может сдвинуть его под горшок, но не в разы.
+  if (refs.every) {
+    const lo = Math.max(1, Math.floor(refs.every.min * 0.5)), hi = Math.ceil(refs.every.max * 1.5);
+    scan.every = Math.min(hi, Math.max(lo, scan.every));
+  }
+  return scan;
 }
 
 const STATUS = { ok: 'всё ок', watch: 'присмотреться', help: 'подлечить' };
@@ -191,6 +195,7 @@ export function scanText(s) {
   if (s.pot !== 'unknown') lines.push(`Горшок: ${html(s.potText || POT[s.pot])}`);
   lines.push(`Полив: раз в ${s.every} дн.${s.waterText ? ', ' + html(s.waterText) : ''}`);
   if (s.light) lines.push(`Свет: ${html(s.light)}`);
+  if (s.identified) lines.push(`Вид по ${s.identified.source}: <i>${html(s.identified.latin)}</i>, ${Math.round(s.identified.score * 100)}%`);
   if (s.todo.length) lines.push('', '<b>Сделать:</b>', ...s.todo.map((t) => '• ' + html(t)));
   if (s.needPhotos?.length) {
     lines.push('', '📸 <b>Чтобы ответить точнее, пришли ещё:</b>', ...s.needPhotos.map((t) => '• ' + html(t)),

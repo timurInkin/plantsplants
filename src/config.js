@@ -14,9 +14,13 @@ export const config = {
   llmVisionModel: process.env.LLM_VISION_MODEL || process.env.LLM_MODEL || 'deepseek/deepseek-v4-flash-vision-exp',
   // Модель, которая по описанию фото пишет вывод и советы. Пустая строка — всё делает модель для фото.
   llmTextModel: process.env.LLM_TEXT_MODEL ?? '~deepseek/deepseek-v4-flash-latest',
-  // Специализированная модель по растениям Plant.id (kindwise.com): определение вида и болезней.
-  // Необязательно: без ключа бот обходится общими моделями.
-  plantIdApiKey: process.env.PLANT_ID_API_KEY || '',
+  // Справочные сервисы, необязательные: без ключей сканер обходится моделями.
+  // Pl@ntNet (my.plantnet.org) определяет вид по фото, бесплатно 500 запросов в день.
+  plantnetApiKey: process.env.PLANTNET_API_KEY || '',
+  plantnetProject: process.env.PLANTNET_PROJECT || 'useful', // база культурных и декоративных растений
+  plantnetType: process.env.PLANTNET_TYPE ?? 'kt',           // движок распознавания
+  // Perenual (perenual.com) отдаёт режим полива и свет для вида, бесплатно 100 запросов в день.
+  perenualApiKey: process.env.PERENUAL_API_KEY || '',
   port: Number(process.env.PORT) || 80,
 };
 
