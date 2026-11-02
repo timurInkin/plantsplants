@@ -3,8 +3,7 @@
 import { config } from './config.js';
 import { todayLocal } from './dates.js';
 
-const SCAN_PROMPT = `Ты помогаешь с комнатными растениями. На фото растение (возможно, с горшком).
-Ответь ТОЛЬКО JSON без пояснений и без markdown, строго по схеме:
+const SCHEMA = `Ответь ТОЛЬКО JSON без пояснений и без markdown, строго по схеме:
 {
   "name": "название по-русски, как в цветочном магазине",
   "latin": "латинское название, 1-3 слова",
@@ -18,10 +17,30 @@ const SCAN_PROMPT = `Ты помогаешь с комнатными расте�
   "light": "какой свет нужен, до 5 слов",
   "todo": ["что сделать прямо сейчас, до 3 пунктов, по 6-8 слов; пустой массив, если всё хорошо"]
 }
-Правила: только то, что видно на фото и что нужно для ухода. Никакой истории, ботаники, родины, токсичности.
-status: ok — здоровое и растёт; watch — есть мелочи; help — нужно лечить. Смотри на пятна, желтизну, сухие края, вялость, вредителей.
+Правила: только то, что нужно для ухода. Никакой истории, ботаники, родины, токсичности.
+status: ok — здоровое и растёт; watch — есть мелочи; help — нужно лечить.
 pot: small — корни лезут, растение сильно больше горшка; big — горшок явно велик; unknown — горшка не видно.
 Пиши коротко и спокойно, по-разговорному, без канцелярита.`;
+
+// Один шаг: модель для фото сразу отвечает по схеме.
+const SCAN_PROMPT = `Ты помогаешь с комнатными растениями. На фото растение (возможно, с горшком).
+Смотри на пятна, желтизну, сухие края, вялость, вредителей, размер горшка.
+${SCHEMA}`;
+
+// Два шага: сначала модель для фото описывает, что видит, потом текстовая модель делает вывод.
+const LOOK_PROMPT = `На фото комнатное растение. Опиши только то, что видно, коротко, списком:
+- что это за растение (по-русски и латынью) и насколько ты уверена;
+- листья и стебли: цвет, пятна, желтизна, сухие или бурые края, вялость, следы вредителей, новые листья;
+- грунт, если виден: сухой или мокрый, налёт;
+- горшок относительно растения: впору, тесный (корни лезут), явно велик, не виден;
+- где стоит и какой свет, если понятно.
+Без советов и без лишних слов.`;
+
+const ADVISE_PROMPT = (seen) => `Ты помогаешь с комнатными растениями. Вот что видно на фото растения:
+${seen}
+
+По этому описанию сделай вывод о состоянии и короткие рекомендации.
+${SCHEMA}`;
 
 const cut = (s, n) => String(s || '').trim().slice(0, n);
 const oneOf = (v, list, d) => (list.includes(v) ? v : d);
@@ -49,24 +68,31 @@ export function normalizeScan(r) {
   };
 }
 
-export async function scanPhoto(bytes) {
-  if (!config.llmApiKey) throw new Error('Сканер пока не подключён. Полив и напоминалки работают.');
+async function chat(model, content, maxTokens) {
   const res = await fetch(config.llmBaseUrl + '/chat/completions', {
     method: 'POST',
-    headers: { Authorization: 'Bearer ' + config.llmApiKey, 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      model: config.llmModel,
-      max_tokens: 800,
-      temperature: 0.2,
-      messages: [{ role: 'user', content: [
-        { type: 'text', text: SCAN_PROMPT },
-        { type: 'image_url', image_url: { url: 'data:image/jpeg;base64,' + Buffer.from(bytes).toString('base64') } },
-      ] }],
-    }),
+    headers: {
+      Authorization: 'Bearer ' + config.llmApiKey,
+      'Content-Type': 'application/json',
+      'X-Title': 'plantsplants',
+    },
+    body: JSON.stringify({ model, max_tokens: maxTokens, temperature: 0.2, messages: [{ role: 'user', content }] }),
   });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error('Сканер сейчас недоступен: ' + (data.error?.message || res.status));
-  return normalizeScan(parseLooseJSON(data.choices?.[0]?.message?.content));
+  if (!res.ok || data.error) throw new Error('Сканер сейчас недоступен: ' + (data.error?.message || res.status));
+  const text = data.choices?.[0]?.message?.content;
+  if (!text) throw new Error('Сканер ответил пустотой, попробуй ещё раз');
+  return text;
+}
+
+export async function scanPhoto(bytes) {
+  if (!config.llmApiKey) throw new Error('Сканер пока не подключён. Полив и напоминалки работают.');
+  const image = { type: 'image_url', image_url: { url: 'data:image/jpeg;base64,' + Buffer.from(bytes).toString('base64') } };
+  if (!config.llmTextModel) {
+    return normalizeScan(parseLooseJSON(await chat(config.llmVisionModel, [{ type: 'text', text: SCAN_PROMPT }, image], 800)));
+  }
+  const seen = await chat(config.llmVisionModel, [{ type: 'text', text: LOOK_PROMPT }, image], 600);
+  return normalizeScan(parseLooseJSON(await chat(config.llmTextModel, ADVISE_PROMPT(seen), 800)));
 }
 
 const STATUS = { ok: 'всё ок', watch: 'присмотреться', help: 'подлечить' };

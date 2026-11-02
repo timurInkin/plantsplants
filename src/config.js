@@ -6,11 +6,14 @@ export const config = {
   publicUrl: need('PUBLIC_URL').replace(/\/+$/, ''),
   supabaseUrl: need('SUPABASE_URL'),
   supabaseKey: need('SUPABASE_SERVICE_KEY'),
-  // Сканер: любой OpenAI-совместимый API с поддержкой картинок. По умолчанию LLM от Amvera.
-  llmBaseUrl: (process.env.LLM_BASE_URL || 'https://inference.waw0.amvera.ru/v1').replace(/\/+$/, ''),
+  // Сканер: любой OpenAI-совместимый API, по умолчанию OpenRouter.
   // Без ключа бот работает, только сканер отвечает, что пока не подключён.
+  llmBaseUrl: (process.env.LLM_BASE_URL || 'https://openrouter.ai/api/v1').replace(/\/+$/, ''),
   llmApiKey: process.env.LLM_API_KEY || '',
-  llmModel: process.env.LLM_MODEL || 'gpt-4.1',
+  // Модель, которая смотрит на фото.
+  llmVisionModel: process.env.LLM_VISION_MODEL || process.env.LLM_MODEL || 'deepseek/deepseek-v4-flash-vision-exp',
+  // Модель, которая по описанию фото пишет вывод и советы. Пустая строка — всё делает модель для фото.
+  llmTextModel: process.env.LLM_TEXT_MODEL ?? '~deepseek/deepseek-v4-flash-latest',
   port: Number(process.env.PORT) || 80,
 };
 
