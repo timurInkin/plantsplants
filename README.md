@@ -12,7 +12,7 @@
 
 | Что | Где |
 | --- | --- |
-| Сервер бота и приложения (Node.js 20) | хостинг [Amvera](https://amvera.ru) |
+| Сервер бота и приложения (Node.js 22) | хостинг [Amvera](https://amvera.ru) |
 | База: цветы, поливы, служебные значения | [Supabase](https://supabase.com), таблицы `plants`, `waterings`, `kv` |
 | Фото цветов | Supabase Storage, бакет `photos` |
 | Сканер: одна модель смотрит на фото, вторая пишет вывод и советы | [OpenRouter](https://openrouter.ai) |
