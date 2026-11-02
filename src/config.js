@@ -3,7 +3,7 @@
 export const config = {
   botToken: need('BOT_TOKEN'),
   // Адрес приложения на Amvera, например https://plants.polina.msk0.amvera.tech
-  publicUrl: need('PUBLIC_URL').replace(/\/+$/, ''),
+  publicUrl: withHttps(need('PUBLIC_URL')),
   supabaseUrl: need('SUPABASE_URL'),
   supabaseKey: need('SUPABASE_SERVICE_KEY'),
   // Сканер: любой OpenAI-совместимый API, по умолчанию OpenRouter.
@@ -32,4 +32,10 @@ function need(name) {
   const value = process.env[name];
   if (!value) throw new Error(`Не задана переменная окружения ${name}`);
   return value;
+}
+
+// Telegram ходит только на https: дописываем схему, если её забыли, и убираем слэш в конце.
+function withHttps(url) {
+  const clean = url.trim().replace(/\/+$/, '');
+  return /^https?:\/\//.test(clean) ? clean.replace(/^http:/, 'https:') : 'https://' + clean;
 }
