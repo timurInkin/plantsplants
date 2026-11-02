@@ -68,6 +68,14 @@ export function normalizeScan(r) {
   };
 }
 
+// Достаём текст ответа. Модели с «размышлениями» иногда кладут всё в reasoning, а content оставляют пустым,
+// а некоторые отдают content списком кусочков.
+function replyText(message) {
+  const c = message?.content;
+  const text = Array.isArray(c) ? c.map((part) => part?.text || '').join('') : c || '';
+  return text.trim() || String(message?.reasoning || '').trim();
+}
+
 async function chat(model, content, maxTokens) {
   const res = await fetch(config.llmBaseUrl + '/chat/completions', {
     method: 'POST',
@@ -79,9 +87,16 @@ async function chat(model, content, maxTokens) {
     body: JSON.stringify({ model, max_tokens: maxTokens, temperature: 0.2, messages: [{ role: 'user', content }] }),
   });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok || data.error) throw new Error('Сканер сейчас недоступен: ' + (data.error?.message || res.status));
-  const text = data.choices?.[0]?.message?.content;
-  if (!text) throw new Error('Сканер ответил пустотой, попробуй ещё раз');
+  if (!res.ok || data.error) {
+    console.error('Сканер: ошибка от', model, res.status, JSON.stringify(data.error || data).slice(0, 500));
+    throw new Error('Сканер сейчас недоступен: ' + (data.error?.message || res.status));
+  }
+  const choice = data.choices?.[0];
+  const text = replyText(choice?.message);
+  if (!text) {
+    console.error('Сканер: пустой ответ от', model, JSON.stringify(data).slice(0, 1000));
+    throw new Error(`Сканер ответил пустотой (${model}, ${choice?.finish_reason || 'без причины'}), попробуй ещё раз`);
+  }
   return text;
 }
 
@@ -89,10 +104,10 @@ export async function scanPhoto(bytes) {
   if (!config.llmApiKey) throw new Error('Сканер пока не подключён. Полив и напоминалки работают.');
   const image = { type: 'image_url', image_url: { url: 'data:image/jpeg;base64,' + Buffer.from(bytes).toString('base64') } };
   if (!config.llmTextModel) {
-    return normalizeScan(parseLooseJSON(await chat(config.llmVisionModel, [{ type: 'text', text: SCAN_PROMPT }, image], 800)));
+    return normalizeScan(parseLooseJSON(await chat(config.llmVisionModel, [{ type: 'text', text: SCAN_PROMPT }, image], 4000)));
   }
-  const seen = await chat(config.llmVisionModel, [{ type: 'text', text: LOOK_PROMPT }, image], 600);
-  return normalizeScan(parseLooseJSON(await chat(config.llmTextModel, ADVISE_PROMPT(seen), 800)));
+  const seen = await chat(config.llmVisionModel, [{ type: 'text', text: LOOK_PROMPT }, image], 3000);
+  return normalizeScan(parseLooseJSON(await chat(config.llmTextModel, ADVISE_PROMPT(seen), 4000)));
 }
 
 const STATUS = { ok: 'всё ок', watch: 'присмотреться', help: 'подлечить' };
