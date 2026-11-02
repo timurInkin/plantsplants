@@ -1,0 +1,17 @@
+{
+  "name": "plantsplants",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Telegram-бот для ухода за растениями",
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.45.0"
+  }
+}
