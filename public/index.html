@@ -118,14 +118,17 @@ h3 { margin:0; font-size:19px; font-weight:500; letter-spacing:-.02em; }
 .photo { display:grid; place-items:center; width:100%; aspect-ratio:4/3; border-radius:28px; overflow:hidden; background:var(--card); color:var(--muted); }
 .photo .ms { font-size:44px; }
 /* Фото в карточке цветка и в скане целиком, без обрезки: высота по самому фото, но не выше 68% экрана. */
-.hero-photo .photo:not(.empty) { display:block; aspect-ratio:auto; }
-.hero-photo .photo:not(.empty) img { height:auto; max-height:68vh; object-fit:contain; }
+.hero-photo .photo:not(.empty) { display:flex; justify-content:center; aspect-ratio:auto; background:none; border-radius:0; overflow:visible; }
+.hero-photo .photo:not(.empty) img { width:auto; height:auto; max-width:100%; max-height:68vh; border-radius:28px; }
+/* Рамка по размеру самого фото: скругления на фото, а не вокруг пустого места. */
+.frame { position:relative; display:inline-block; max-width:100%; line-height:0; }
 /* Несколько фото листаются вбок. Рамка одна на всех, фото целиком, без обрезки. */
-.gallery .slides { display:flex; overflow-x:auto; scroll-snap-type:x mandatory; overscroll-behavior-x:contain; scrollbar-width:none; border-radius:28px; }
+.gallery { --gal-h:min(54vh, calc((min(100vw, 560px) - 32px) * 4 / 3)); }
+.gallery .slides { display:flex; overflow-x:auto; scroll-snap-type:x mandatory; overscroll-behavior-x:contain; scrollbar-width:none; }
 .gallery .slides::-webkit-scrollbar { display:none; }
 .gallery .slide { flex:0 0 100%; scroll-snap-align:center; scroll-snap-stop:always; }
-.gallery .photo { display:block; aspect-ratio:3/4; max-height:54vh; border-radius:0; }
-.gallery .photo img { object-fit:contain; }
+.gallery .photo { display:flex; align-items:center; justify-content:center; height:var(--gal-h); aspect-ratio:auto; background:none; border-radius:0; overflow:visible; }
+.gallery .photo img { width:auto; height:auto; max-width:100%; max-height:var(--gal-h); border-radius:28px; }
 .dots { display:flex; justify-content:center; gap:6px; margin-top:10px; }
 .dots button { width:7px; height:7px; padding:0; border:0; border-radius:4px; background:var(--ring); cursor:pointer; transition:width .2s, background .2s; }
 .dots button.on { width:20px; background:var(--sage); }
