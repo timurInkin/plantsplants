@@ -244,15 +244,16 @@ export async function scanPhoto(images, note = '', onStage = null, prior = null)
 
 const STATUS = { ok: 'всё ок', watch: 'присмотреться', help: 'подлечить' };
 const POT = { ok: 'горшок норм', small: 'тесный горшок', big: 'горшок великоват', unknown: '' };
+const lower = (t) => /^[A-ZА-ЯЁ][a-zа-яё]/.test(t) ? t[0].toLowerCase() + t.slice(1) : t;
 const html = (s) => String(s).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
 
 // Текст ответа в чате.
 export function scanText(s) {
   const lines = [`🌿 <b>${html(s.name)}</b>${s.latin ? ' · <i>' + html(s.latin) + '</i>' : ''}`, ''];
-  lines.push(`Состояние: ${STATUS[s.status]}${s.statusText ? ', ' + html(s.statusText) : ''}`);
+  lines.push(`Состояние: ${STATUS[s.status]}${s.statusText ? ', ' + html(lower(s.statusText)) : ''}`);
   if (s.why) lines.push(`Почему: ${html(s.why)}`);
   if (s.pot !== 'unknown') lines.push(`Горшок: ${html(s.potText || POT[s.pot])}`);
-  lines.push(`Полив: раз в ${s.every} дн.${s.waterText ? ', ' + html(s.waterText) : ''}`);
+  lines.push(`Полив: раз в ${s.every} дн.${s.waterText ? ', ' + html(lower(s.waterText)) : ''}`);
   if (s.light) lines.push(`Свет: ${html(s.light)}`);
   if (s.identified) {
     lines.push(`${s.identified.disputed ? `${s.identified.source} думает иначе` : `Вид по ${s.identified.source}`}: <i>${html(s.identified.latin)}</i>, ${Math.round(s.identified.score * 100)}%`);

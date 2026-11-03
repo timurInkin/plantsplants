@@ -92,6 +92,8 @@ function app() {
 
   const check = (done) => '<span class="check' + (done ? ' on' : '') + '">' + (done ? ms('check') : '') + '</span>';
   const chip = (text, cls, icon) => '<span class="chip ' + cls + '">' + (icon ? ms(icon) : '') + esc(text) + '</span>';
+  // Текст модели после запятой: «Поливать, когда…» → «поливать, когда…». Аббревиатуры не трогаем.
+  const lower = (t) => /^[A-ZА-ЯЁ][a-zа-яё]/.test(t) ? t[0].toLowerCase() + t.slice(1) : t;
   const fact = (icon, text) => '<li>' + ms(icon) + '<span>' + esc(text) + '</span></li>';
 
   function when(p) {
@@ -132,7 +134,7 @@ function app() {
       fact('eco', s.statusText || STATUS[s.status][0]) +
       (s.why ? fact('search', s.why) : '') +
       (s.pot !== 'unknown' ? fact('potted_plant', s.potText || POT[s.pot][0]) : '') +
-      fact('water_drop', 'раз в ' + days(s.every) + (s.waterText ? ', ' + s.waterText : '')) +
+      fact('water_drop', 'раз в ' + days(s.every) + (s.waterText ? ', ' + lower(s.waterText) : '')) +
       (s.light ? fact('light_mode', s.light) : '') +
       (s.identified ? fact('biotech', (s.identified.disputed ? s.identified.source + ' думает иначе: ' : 'вид по ' + s.identified.source + ': ') + s.identified.latin + ', ' + Math.round(s.identified.score * 100) + '%') : '') + '</ul>';
   }
