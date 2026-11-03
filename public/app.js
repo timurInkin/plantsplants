@@ -173,10 +173,8 @@ function app() {
         (left > 1 ? '<button class="pill light" data-action="water-all"><span>Полила всех</span><i>' + ms('done_all') + '</i></button>' : '') + '</section>';
     } else if (next) {
       const same = state.plants.filter((p) => p.dueIn === next.dueIn && !p.wateredToday);
-      const soon = next.dueIn === 1 ? '<span class="when">завтра</span>' : '<span class="when"><small>через</small>' + days(next.dueIn) + '</span>';
-      h += '<section class="card green water"><div class="tag-row">' + tag + '</div>' +
-        '<button class="next-water" data-open="' + next.id + '"><span class="txt">' + soon +
-        '<b>' + esc(next.name) + (same.length > 1 ? ' <i>и ещё ' + (same.length - 1) + '</i>' : '') + '</b></span>' +
+      h += '<section class="card green water"><button class="next-water" data-open="' + next.id + '"><span class="txt">' + tag +
+        '<span class="line">дальше ' + esc(next.name) + (same.length > 1 ? ' и\u00a0ещё\u00a0' + (same.length - 1) : '') + ', ' + (next.dueIn === 1 ? 'завтра' : ('через ' + days(next.dueIn)).replace(/ /g, '\u00a0')) + '</span></span>' +
         pic(next, 'thumb') + '</button></section>';
     } else {
       h += '<section class="card green water"><div class="tag-row">' + tag + '<small>никого поливать не надо</small></div></section>';
