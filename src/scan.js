@@ -182,9 +182,13 @@ function withStrict(content) {
 
 // Подсказки к промпту: справочные сервисы, комментарий человека к фото и сколько фото уже прислали.
 // prior — что показал скан по первым фото, если эти фото досняты к нему.
-function extras(references, note, count = 1, prior = null, forLook = false) {
+function extras(references, note, count = 1, prior = null, forLook = false, detail = false) {
   let t = '';
-  if (count > 1) {
+  if (count > 1 && detail) {
+    t += '\nПервое фото — растение целиком, его уже разбирали. Остальные — крупные планы деталей, которые хозяйка специально показывает ' +
+      '(пятно, лист, стебель, грунт). Разгляди эти детали внимательно и обнови состояние, причину и советы с их учётом.';
+    t += forLook ? '\n' : ' Ещё фото проси, только если без них вывод будет неверным.\n';
+  } else if (count > 1) {
     t += '\nПервое фото основное для определения вида. Остальные досняты по просьбе: горшок, грунт, листья поближе.';
     t += forLook ? '\n' : ` Это уже ${count} фото, ещё фото проси, только если без них вывод будет неверным.\n`;
   }
@@ -199,10 +203,10 @@ function extras(references, note, count = 1, prior = null, forLook = false) {
 
 // images — одно или несколько фото одного растения; note — подпись человека к фото;
 // onStage(text) — по ходу скана сообщает, что сейчас происходит («похоже, это …», «пишу советы»), чтобы ждать было не вслепую;
-// prior — результат скана по первым фото, если новые фото досняты к нему.
+// prior — результат скана по первым фото, если новые фото досняты к нему; detail — новые фото это крупные планы деталей цветка из коллекции.
 // Справочники и модель для фото работают одновременно, чтобы не ждать их по очереди:
 // подсказки Pl@ntNet и Perenual получает модель, которая пишет вывод.
-export async function scanPhoto(images, note = '', onStage = null, prior = null) {
+export async function scanPhoto(images, note = '', onStage = null, prior = null, detail = false) {
   if (!config.llmApiKey) throw new Error('Сканер пока не подключён. Полив и напоминалки работают.');
   images = [].concat(images);
   const pics = images.map((b) => ({ type: 'image_url', image_url: { url: 'data:image/jpeg;base64,' + Buffer.from(b).toString('base64') } }));
@@ -218,12 +222,12 @@ export async function scanPhoto(images, note = '', onStage = null, prior = null)
   let scan, refs;
   if (!config.llmTextModel) {
     refs = await refsJob;
-    scan = await step('модель', verdict(config.llmVisionModel, [{ type: 'text', text: SCAN_PROMPT + extras(refs.text, note, images.length, prior) }, ...pics]));
+    scan = await step('модель', verdict(config.llmVisionModel, [{ type: 'text', text: SCAN_PROMPT + extras(refs.text, note, images.length, prior, false, detail) }, ...pics]));
   } else {
-    const seenJob = step('модель для фото', look([{ type: 'text', text: LOOK_PROMPT + extras('', note, images.length, prior, true) }, ...pics]));
+    const seenJob = step('модель для фото', look([{ type: 'text', text: LOOK_PROMPT + extras('', note, images.length, prior, true, detail) }, ...pics]));
     [refs] = await Promise.all([refsJob, seenJob]);
     say(guess + 'Пишу вывод и советы, ещё немного…');
-    scan = await step('модель для вывода', verdict(config.llmTextModel, ADVISE_PROMPT(await seenJob, extras(refs.text, note, images.length, prior))));
+    scan = await step('модель для вывода', verdict(config.llmTextModel, ADVISE_PROMPT(await seenJob, extras(refs.text, note, images.length, prior, false, detail))));
   }
   if (refs.identified) {
     scan.identified = refs.identified;

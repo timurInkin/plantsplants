@@ -67,10 +67,11 @@ async function api(uid, path, req) {
   if (path === '/api/scan') {
     const bytes = await readBody(req, 4_000_000);
     if (!bytes.length) throw new Error('Пустое фото');
-    const more = new URL(req.url, 'http://x').searchParams.get('more') === '1';
+    const q = new URL(req.url, 'http://x').searchParams;
+    const more = q.get('more') === '1', plant = q.get('plant') || null;
     const job = { id: crypto.randomBytes(6).toString('hex'), status: 'working' };
     scanJobs.set(uid, job);
-    track('скан из приложения', () => scanForUser(uid, bytes, '', more, false, (text) => { job.stage = text; })).then(
+    track('скан из приложения', () => scanForUser(uid, bytes, '', more, false, (text) => { job.stage = text; }, plant)).then(
       (r) => Object.assign(job, { status: 'done', scan: r.scan, photos: r.photos }),
       (e) => {
         if (!e.status) console.error('Скан из приложения не удался', e);

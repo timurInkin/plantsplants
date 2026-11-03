@@ -245,7 +245,12 @@ function app() {
     }
 
     if (own()) {
-      h += '<button class="pill" data-rescan="' + p.id + '"><span>' + (s ? 'Пересканировать этот цветок' : 'Сканировать') + '</span><i>' + ms('photo_camera') + '</i></button>';
+      if (s) {
+        h += '<button class="pill" data-detail="' + p.id + '"><span>Добавить фото детали<small>пятно, лист снизу, грунт: обновлю советы</small></span><i>' + ms('add_a_photo') + '</i></button>' +
+          '<button class="link-btn" data-rescan="' + p.id + '">' + ms('photo_camera') + 'Пересканировать целиком</button>';
+      } else {
+        h += '<button class="pill" data-rescan="' + p.id + '"><span>Сканировать</span><i>' + ms('photo_camera') + '</i></button>';
+      }
       h += '<button class="link-btn" data-delete="' + p.id + '">' + ms('delete') + 'Удалить из коллекции</button>';
     }
     return h;
@@ -273,7 +278,7 @@ function app() {
     h += '<section class="hero-photo"><span class="photo"><img src="' + scan.preview + '" alt=""></span>' +
       (scan.status === 'loading' ? '<span class="scanning"><i></i></span>' : '') + '</section>';
     if (scan.status === 'loading') {
-      return h + headline('Смотрю…', scanMore ? 'вместе с прошлыми фото, минуту-полторы' : 'обычно минуту-полторы') +
+      return h + headline('Смотрю…', scan.detail ? 'деталь вместе с фото цветка, минуту-полторы' : scanMore ? 'вместе с прошлыми фото, минуту-полторы' : 'обычно минуту-полторы') +
         '<p class="wait-line"><b id="elapsed">' + clock(scan.started) + '</b><span>' + esc(scan.stage || 'Определяю вид, разглядываю листья, грунт и горшок…') + '</span></p>';
     }
     if (scan.status === 'error') {
@@ -290,7 +295,7 @@ function app() {
         '<button class="pill" data-action="shoot-more"><span>Доснять</span><i>' + ms('photo_camera') + '</i></button></section>';
     }
     if (scan.photos > 1) {
-      h += '<button class="link-btn" data-action="scan-undo">' + ms('undo') + 'Вернуть прошлый результат, без последнего фото</button>';
+      h += '<button class="link-btn" data-action="scan-undo">' + ms('undo') + (scan.detail && scan.photos === 2 ? 'Вернуть как было в карточке' : 'Вернуть прошлый результат, без последнего фото') + '</button>';
     }
     // Куда сохранить. Новый цветок всегда можно выбрать, а обновить карточку, на которую скан не похож, только после вопроса.
     const target = scan.target && byId(scan.target);
@@ -300,7 +305,7 @@ function app() {
         '<button class="link-btn" data-save="' + target.id + '" data-sure="1">Всё равно обновить «' + esc(target.name) + '»</button>';
     } else if (target) {
       h += '<button class="pill" data-save="' + target.id + '"><span>Обновить «' + esc(target.name) + '»</span><i>' + ms('check') + '</i></button>' +
-        '<button class="link-btn" data-save="new">' + ms('add') + 'Нет, это другой цветок, сохранить как новый</button>';
+        (scan.detail ? '' : '<button class="link-btn" data-save="new">' + ms('add') + 'Нет, это другой цветок, сохранить как новый</button>');
     } else {
       h += '<section class="card"><div class="card-head"><div><h3>Сохранить</h3><p>фото и скан попадут в карточку цветка</p></div></div>' + saveNew +
         (state.plants.length ? '<p class="sub">Или это кто-то из твоих? Обновлю его фото и скан:</p><div class="pick">' +
@@ -481,6 +486,7 @@ function app() {
   document.body.appendChild(camera);
   let scanTarget = null;
   let scanMore = false;     // досылаем фото к текущему скану
+  let scanDetail = false;   // фото детали к цветку из коллекции
 
   // Скан идёт минуту-полторы, а телефон может оборвать такой долгий запрос. Поэтому фото только отправляем,
   // а потом каждые 2 секунды спрашиваем сервер, готово ли.
@@ -513,10 +519,16 @@ function app() {
     try {
       const img = await shrink(file);
       // При досъёмке сверху остаётся первое, основное фото.
+      // При фото детали сверху фото самого цветка.
       const keep = scanMore && scan && scan.preview;
-      scan = { status: 'loading', preview: keep ? scan.preview : img.preview, prevResult: keep ? scan.result : null, prevPhotos: keep ? scan.photos : 0, target: scanTarget, started: Date.now() };
+      const plant = scanDetail && byId(scanTarget);
+      const detail = !!plant || !!(keep && scan.detail);
+      scan = {
+        status: 'loading', preview: keep ? scan.preview : plant && plant.photo ? plant.photo : img.preview,
+        prevResult: keep ? scan.result : null, prevPhotos: keep ? scan.photos : 0, target: scanTarget, detail, started: Date.now(),
+      };
       go('scan');
-      const { job } = await api('/api/scan' + (scanMore ? '?more=1' : ''), img.blob, true);
+      const { job } = await api('/api/scan' + (scanMore ? '?more=1' : plant ? '?plant=' + encodeURIComponent(plant.id) : ''), img.blob, true);
       const res = await waitForScan(job, isCurrent);
       if (!res || !isCurrent()) return;
       scan = { ...scan, status: 'done', result: res.scan, photos: res.photos || 1 };
@@ -533,9 +545,10 @@ function app() {
     if (route === 'scan') render();
   });
 
-  function shoot(target, more) {
+  function shoot(target, more, detail) {
     scanTarget = target || null;
     scanMore = !!more;
+    scanDetail = !!detail && !more;
     camera.click();
   }
 
@@ -557,6 +570,7 @@ function app() {
       return act(() => api('/api/plant/update', { plant: p.id, every }), b);
     }
     if (d.rescan) return shoot(d.rescan);
+    if (d.detail) return shoot(d.detail, false, true);
     if (d.delete) {
       const p = byId(d.delete);
       if (!confirm('Удалить «' + p.name + '»?')) return;
@@ -599,7 +613,7 @@ function app() {
       if (!confirm('Сделать новую ссылку? По старой больше никто не сможет зайти. У тех, кто уже зашёл, доступ останется.')) return;
       return loadShare('/api/share/reset');
     }
-    if (d.action === 'shoot') return shoot(scan && scan.target);
+    if (d.action === 'shoot') return shoot(scan && scan.target, false, scan && scan.detail && !scan.result);
     if (d.action === 'shoot-more') return shoot(scan && scan.target, true);
     if (d.action === 'scan-undo') {
       haptic();

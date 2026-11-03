@@ -151,6 +151,13 @@ export async function undoPending(uid) {
   return { scan, photos };
 }
 
+// Основное фото цветка из коллекции, чтобы разобрать его вместе с фото детали.
+export async function downloadPhoto(path) {
+  const { data, error } = await photos().download(path);
+  if (error || !data) return null;
+  return Buffer.from(await data.arrayBuffer());
+}
+
 // Фото незавершённого скана, чтобы досланное фото разобрать вместе с ними.
 export async function pendingImages(uid, count) {
   const got = await Promise.all(Array.from({ length: count }, (_, i) => photos().download(pendingPath(uid, i))));
@@ -164,7 +171,7 @@ export async function pendingImages(uid, count) {
 
 export async function savePending(uid, target) {
   const [user, existing] = await Promise.all([getUser(uid), target === 'new' ? null : getPlant(uid, target)]);
-  const { photos: _count, at: _at, prev: _prev, ...scan } = user?.pending_scan || {};
+  const { photos: _count, at: _at, prev: _prev, detail: _detail, ...scan } = user?.pending_scan || {};
   if (!scan.name) throw fail('Скан потерялся, сфоткай ещё раз');
   if (target !== 'new' && !existing) throw notFound();
 
