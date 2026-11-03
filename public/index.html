@@ -99,10 +99,14 @@ h3 { margin:0; font-size:19px; font-weight:500; letter-spacing:-.02em; }
 .flag { position:absolute; top:14px; right:14px; width:32px; height:32px; border-radius:50%; display:grid; place-items:center; }
 .flag.lime { background:var(--lime); color:var(--lime-text); } .flag.warm { background:var(--warm); color:var(--warm-text); }
 .flag .ms { font-size:18px; }
+.flag.dot { top:18px; right:18px; width:12px; height:12px; box-shadow:0 0 0 3px var(--card); background:var(--lime-text); }
 
 .hero-photo { position:relative; }
 .photo { display:grid; place-items:center; width:100%; aspect-ratio:4/3; border-radius:28px; overflow:hidden; background:var(--card); color:var(--muted); }
 .photo .ms { font-size:44px; }
+/* Фото в карточке цветка и в скане целиком, без обрезки: высота по самому фото, но не выше 68% экрана. */
+.hero-photo .photo:not(.empty) { display:block; aspect-ratio:auto; }
+.hero-photo .photo:not(.empty) img { height:auto; max-height:68vh; object-fit:contain; }
 .scanning { position:absolute; inset:0; border-radius:28px; overflow:hidden; background:rgba(30,40,30,.25); }
 .scanning i { position:absolute; left:0; right:0; height:3px; background:#fff; box-shadow:0 0 18px 4px rgba(255,255,255,.7); animation:sweep 1.6s ease-in-out infinite alternate; }
 @keyframes sweep { from { top:6%; } to { top:94%; } }

@@ -35,7 +35,7 @@ function app() {
   const MONTHS = ['января', 'февраля', 'марта', 'апреля', 'мая', 'июня', 'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря'];
   const DAYS = ['Воскресенье', 'Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница', 'Суббота'];
   const TABS = [['today', 'Сегодня'], ['plants', 'Цветы'], ['scan', 'Скан']];
-  const STATUS = { ok: ['всё ок', 'sage', 'check_circle'], watch: ['присмотреться', 'lime', 'visibility'], help: ['подлечить', 'warm', 'healing'] };
+  const STATUS = { ok: ['всё ок', 'sage', 'check_circle'], watch: ['присмотреться', 'lime', ''], help: ['подлечить', 'warm', 'healing'] };
   const POT = { ok: ['горшок норм', 'sage'], small: ['тесный горшок', 'warm'], big: ['горшок великоват', 'lime'] };
 
   let state = null;
@@ -195,7 +195,7 @@ function app() {
       const w = when(p);
       const s = p.scan ? STATUS[p.scan.status] : null;
       return '<button class="tile" data-open="' + p.id + '">' + pic(p, 'pic') +
-        (s && p.scan.status !== 'ok' ? '<span class="flag ' + s[1] + '">' + ms(s[2]) + '</span>' : '') +
+        (s && p.scan.status !== 'ok' ? '<span class="flag ' + s[1] + (s[2] ? '">' + ms(s[2]) : ' dot">') + '</span>' : '') +
         '<span class="tile-body"><b>' + esc(p.name) + '</b>' + chip(w[0], w[1], 'water_drop') + '</span></button>';
     }).join('') +
       (own() ? '<button class="tile add" data-go="scan"><span class="pic">' + ms('add_a_photo') + '</span><span class="tile-body"><b>Добавить</b><small>через скан</small></span></button>' : '') + '</div>';
@@ -304,7 +304,7 @@ function app() {
     h += headline('Поделиться цветами', 'с тем, кто присмотрит за ними');
     const ready = share && share.status === 'done';
     h += '<section class="card"><ul class="facts">' +
-      fact('visibility', 'Увидит все твои цветы и что с ними') +
+      fact('local_florist', 'Увидит все твои цветы и что с ними') +
       fact('water_drop', 'Сможет отмечать полив, ты увидишь это у себя') +
       fact('notifications', 'Будет получать напоминалки о поливе') +
       fact('lock', 'Удалять, добавлять и сканировать твои цветы не сможет') + '</ul>' +
