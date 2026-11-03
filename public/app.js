@@ -316,8 +316,39 @@ function app() {
     else if (route === 'scan') view = viewScan();
     else if (route === 'share') view = viewShare();
     else view = viewToday();
-    root.innerHTML = '<nav class="tabs">' + TABS.filter((t) => own() || t[0] !== 'scan').map((t) => '<button data-go="' + t[0] + '" class="' + (t[0] === tab ? 'on' : '') + '">' +
-      (t[0] === 'scan' ? ms('photo_camera') : '') + t[1] + '</button>').join('') + '</nav><main>' + view + '</main>';
+    patch(root, '<nav class="tabs">' + TABS.filter((t) => own() || t[0] !== 'scan').map((t) => '<button data-go="' + t[0] + '" class="' + (t[0] === tab ? 'on' : '') + '">' +
+      (t[0] === 'scan' ? ms('photo_camera') : '') + t[1] + '</button>').join('') + '</nav><main>' + view + '</main>');
+  }
+
+  // Экран не перерисовывается целиком: новая разметка сравнивается с той, что уже на экране,
+  // и меняются только отличающиеся кусочки (галочка, надпись на кнопке, строчка). Фото и прокрутка остаются на месте.
+  function patch(el, html) {
+    const next = document.createElement('div');
+    next.innerHTML = html;
+    morphChildren(el, next);
+  }
+  function morphChildren(from, to) {
+    const a = Array.from(from.childNodes), b = Array.from(to.childNodes);
+    for (let i = 0; i < b.length; i++) {
+      if (i < a.length) morph(a[i], b[i]);
+      else from.appendChild(b[i]);
+    }
+    for (let i = b.length; i < a.length; i++) a[i].remove();
+  }
+  function morph(from, to) {
+    if (from.nodeType !== to.nodeType || from.nodeName !== to.nodeName ||
+      (from.nodeType === 1 && from.getAttribute('src') !== to.getAttribute('src'))) {
+      from.replaceWith(to); // другой элемент или другое фото: проще заменить
+      return;
+    }
+    if (from.nodeType !== 1) {
+      if (from.nodeValue !== to.nodeValue) from.nodeValue = to.nodeValue;
+      return;
+    }
+    for (const at of Array.from(from.attributes)) if (!to.hasAttribute(at.name)) from.removeAttribute(at.name);
+    for (const at of Array.from(to.attributes)) if (from.getAttribute(at.name) !== at.value) from.setAttribute(at.name, at.value);
+    if (from.nodeName === 'INPUT' && from.value !== to.value) from.value = to.value;
+    morphChildren(from, to);
   }
 
   function go(r) {
