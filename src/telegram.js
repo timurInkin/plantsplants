@@ -1,4 +1,4 @@
-// Обращения к Telegram и проверка, что запрос из приложения пришёл от хозяйки бота.
+// Обращения к Telegram и проверка, от кого пришёл запрос из приложения.
 
 import crypto from 'node:crypto';
 import { config } from './config.js';
@@ -16,6 +16,16 @@ export async function downloadFile(fileId) {
   return Buffer.from(await res.arrayBuffer());
 }
 
+// Имя бота для ссылок-приглашений вида t.me/<имя>?start=…
+let me = null;
+export async function botUsername() {
+  if (!me) {
+    const r = await tg('getMe', {});
+    if (r.ok) me = r.result;
+  }
+  return me?.username || '';
+}
+
 export const appButton = (text, screen) => ({ text, web_app: { url: `${config.publicUrl}/#${screen}` } });
 
 export const webhookSecret = crypto.createHash('sha256').update('hook:' + config.botToken).digest('hex').slice(0, 32);
@@ -26,8 +36,9 @@ export async function setupTelegram() {
     tg('setWebhook', { url: config.publicUrl + '/webhook', secret_token: webhookSecret, allowed_updates: ['message', 'callback_query'] }),
     tg('setChatMenuButton', { menu_button: { type: 'web_app', text: 'Мои цветы', web_app: { url: config.publicUrl + '/#today' } } }),
     tg('setMyCommands', { commands: [{ command: 'start', description: 'Начать' }] }),
+    botUsername(),
   ]);
-  const failed = results.find((r) => !r.ok);
+  const failed = results.slice(0, 3).find((r) => !r.ok);
   if (failed) console.error('Telegram не принял настройки, проверь BOT_TOKEN и PUBLIC_URL:', failed.description);
   else console.log('Telegram подключён:', config.publicUrl);
 }

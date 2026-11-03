@@ -1,19 +1,29 @@
-// Всё, что хранится в Supabase: люди, их цветы, поливы и фото.
+// Всё, что хранится в Supabase: люди, их цветы, поливы, фото и гостевой доступ.
 // Бот многопользовательский: у каждого человека в Telegram своя коллекция цветов.
+// Коллекцией можно поделиться: гость видит цветы, отмечает полив и получает напоминалки.
+//
+// Каждый запрос к Supabase — это поездка до сервера базы, поэтому их тут по возможности мало
+// и независимые идут параллельно. Время всех запросов видно в логах (см. timing.js).
 
 import crypto from 'node:crypto';
 import { createClient } from '@supabase/supabase-js';
 import { config, PHOTO_BUCKET } from './config.js';
 import { todayLocal, daysBetween } from './dates.js';
+import { timedFetch } from './timing.js';
 
-export const supabase = createClient(config.supabaseUrl, config.supabaseKey, { auth: { persistSession: false } });
+export const supabase = createClient(config.supabaseUrl, config.supabaseKey, {
+  auth: { persistSession: false },
+  global: { fetch: timedFetch },
+});
+const photos = () => supabase.storage.from(PHOTO_BUCKET);
 
 function check({ data, error }) {
   if (error) throw new Error('База не ответила: ' + error.message);
   return data;
 }
 
-const notFound = () => Object.assign(new Error('Нет такого цветка'), { status: 400 });
+const fail = (message) => Object.assign(new Error(message), { status: 400 });
+const notFound = () => fail('Нет такого цветка');
 
 // ───── люди ─────
 
@@ -21,12 +31,18 @@ export async function getUser(id) {
   return check(await supabase.from('users').select('*').eq('id', id).maybeSingle());
 }
 
-// Человек появляется в базе, как только написал боту. chat_id нужен для напоминалок.
+// Человек появляется в базе, как только написал боту или открыл приложение. chat_id нужен для напоминалок.
+// Кого уже видели с момента запуска, больше не проверяем: это лишний запрос на каждое нажатие.
+const known = new Set();
 export async function touchUser(id, chatId, name) {
-  const user = await getUser(id);
-  if (user) return { user, isNew: false };
-  const created = check(await supabase.from('users').insert({ id, chat_id: chatId, name: name || null }).select().single());
-  return { user: created, isNew: true };
+  if (known.has(id)) return { isNew: false };
+  let isNew = false;
+  if (!(await getUser(id))) {
+    check(await supabase.from('users').upsert({ id, chat_id: chatId, name: name || null }, { onConflict: 'id', ignoreDuplicates: true }));
+    isNew = true;
+  }
+  known.add(id);
+  return { isNew };
 }
 
 export async function updateUser(id, fields) {
@@ -46,37 +62,36 @@ export async function getPlant(uid, id) {
   if (!id) return null;
   return check(await supabase.from('plants').select('*').eq('user_id', uid).eq('id', id).maybeSingle());
 }
-async function addPlant(uid, plant) {
-  const id = 'p' + Date.now().toString(36) + crypto.randomBytes(2).toString('hex');
-  return check(await supabase.from('plants').insert({ ...plant, id, user_id: uid }).select().single());
-}
+const newPlantId = () => 'p' + Date.now().toString(36) + crypto.randomBytes(2).toString('hex');
+
 export async function updatePlant(uid, id, fields) {
   check(await supabase.from('plants').update(fields).eq('user_id', uid).eq('id', id));
 }
-export async function deletePlant(uid, id) {
-  const plant = await getPlant(uid, id);
-  if (!plant) throw notFound();
-  check(await supabase.from('plants').delete().eq('user_id', uid).eq('id', id));
-  if (plant.photo_path) await supabase.storage.from(PHOTO_BUCKET).remove([plant.photo_path]);
+export async function deletePlant(uid, plant) {
+  check(await supabase.from('plants').delete().eq('user_id', uid).eq('id', plant.id));
+  if (plant.photo_path) await photos().remove([plant.photo_path]);
+}
+
+// Похоже ли растение в карточке на то, что на новом скане: сравниваем род по латыни.
+// false — точно разные растения, null — сравнить не по чему.
+const genus = (latin) => String(latin || '').trim().split(/\s+/)[0].toLowerCase();
+export function sameKind(plant, scan) {
+  const a = genus(plant?.scan?.latin), b = genus(scan?.latin);
+  return a && b ? a === b : null;
 }
 
 // ───── поливы ─────
 
-async function lastWaterings(plantIds) {
-  if (!plantIds.length) return {};
-  const since = new Date(Date.now() - 90 * 86400000).toISOString().slice(0, 10);
-  const rows = check(await supabase.from('waterings').select('plant_id, day')
-    .in('plant_id', plantIds).gte('day', since).order('day', { ascending: false }));
-  const last = {};
-  for (const r of rows) if (!last[r.plant_id]) last[r.plant_id] = r.day;
-  return last;
+// Отметка «полито сегодня». Повторное нажатие её снимает.
+export async function toggleWater(plantId, day) {
+  const removed = check(await supabase.from('waterings').delete().eq('plant_id', plantId).eq('day', day).select());
+  if (!removed.length) check(await supabase.from('waterings').insert({ plant_id: plantId, day }));
 }
 
-export async function toggleWater(uid, plantId, day) {
-  if (!(await getPlant(uid, plantId))) throw notFound();
-  const exists = check(await supabase.from('waterings').select('day').eq('plant_id', plantId).eq('day', day).maybeSingle());
-  if (exists) check(await supabase.from('waterings').delete().eq('plant_id', plantId).eq('day', day)); // повторное нажатие отменяет
-  else check(await supabase.from('waterings').insert({ plant_id: plantId, day }));
+// «Последний раз поливали тогда-то»: от этого дня считаем следующий полив, более поздние отметки убираем.
+export async function setLastWatering(plantId, day) {
+  check(await supabase.from('waterings').delete().eq('plant_id', plantId).gt('day', day));
+  check(await supabase.from('waterings').upsert({ plant_id: plantId, day }));
 }
 
 export async function waterAllDue(uid, day) {
@@ -85,15 +100,17 @@ export async function waterAllDue(uid, day) {
   return due.length;
 }
 
-// Всё, что нужно экрану приложения.
+// Всё, что нужно экрану приложения. Один запрос: цветы вместе с последним поливом каждого.
 export async function buildState(uid) {
   const today = todayLocal();
-  const plants = await getPlants(uid);
-  const last = await lastWaterings(plants.map((p) => p.id));
+  const plants = check(await supabase.from('plants').select('*, waterings(day)').eq('user_id', uid)
+    .order('created_at').order('id')
+    .order('day', { referencedTable: 'waterings', ascending: false })
+    .limit(1, { referencedTable: 'waterings' }));
   return {
     today,
     plants: plants.map((p) => {
-      const lastDay = last[p.id] || null;
+      const lastDay = p.waterings?.[0]?.day || null;
       return {
         id: p.id, name: p.name, every: p.every, scan: p.scan,
         last: lastDay,
@@ -108,7 +125,7 @@ export async function buildState(uid) {
 // ───── фото ─────
 
 export function photoUrl(path) {
-  return supabase.storage.from(PHOTO_BUCKET).getPublicUrl(path).data.publicUrl;
+  return photos().getPublicUrl(path).data.publicUrl;
 }
 
 // Последний скан ждёт, пока его сохранят: в новый цветок или в существующий. У каждого человека свой.
@@ -116,19 +133,19 @@ export function photoUrl(path) {
 export const MAX_SCAN_PHOTOS = 4;
 const pendingPath = (uid, i) => `pending/${uid}-${i}.jpg`;
 
-export async function keepPending(uid, images, scan) {
-  const bucket = supabase.storage.from(PHOTO_BUCKET);
-  for (let i = 0; i < images.length; i++) {
-    check(await bucket.upload(pendingPath(uid, i), images[i], { contentType: 'image/jpeg', upsert: true }));
-  }
-  await updateUser(uid, { pending_scan: { ...scan, photos: images.length, at: Date.now() } });
+export async function uploadPending(uid, i, bytes) {
+  check(await photos().upload(pendingPath(uid, i), bytes, { contentType: 'image/jpeg', upsert: true }));
+}
+
+export async function setPending(uid, scan, count) {
+  await updateUser(uid, { pending_scan: { ...scan, photos: count, at: Date.now() } });
 }
 
 // Фото незавершённого скана, чтобы досланное фото разобрать вместе с ними.
 export async function pendingImages(uid, count) {
+  const got = await Promise.all(Array.from({ length: count }, (_, i) => photos().download(pendingPath(uid, i))));
   const out = [];
-  for (let i = 0; i < count; i++) {
-    const { data, error } = await supabase.storage.from(PHOTO_BUCKET).download(pendingPath(uid, i));
+  for (const { data, error } of got) {
     if (error || !data) break;
     out.push(Buffer.from(await data.arrayBuffer()));
   }
@@ -136,21 +153,87 @@ export async function pendingImages(uid, count) {
 }
 
 export async function savePending(uid, target) {
-  const user = await getUser(uid);
-  const { photos, at, ...scan } = user?.pending_scan || {};
-  if (!scan.name) throw Object.assign(new Error('Скан потерялся, сфоткай ещё раз'), { status: 400 });
-  let plant;
-  if (target === 'new') {
-    plant = await addPlant(uid, { name: scan.name, every: scan.every, scan });
-  } else {
-    plant = await getPlant(uid, target);
-    if (!plant) throw notFound();
-  }
+  const [user, existing] = await Promise.all([getUser(uid), target === 'new' ? null : getPlant(uid, target)]);
+  const { photos: _count, at: _at, ...scan } = user?.pending_scan || {};
+  if (!scan.name) throw fail('Скан потерялся, сфоткай ещё раз');
+  if (target !== 'new' && !existing) throw notFound();
+
+  const id = existing ? existing.id : newPlantId();
   // Имя файла новое при каждом скане, чтобы телефон не показывал старое фото из кэша.
-  const path = `${uid}/${plant.id}-${Date.now().toString(36)}.jpg`;
-  check(await supabase.storage.from(PHOTO_BUCKET).copy(pendingPath(uid, 0), path));
-  if (plant.photo_path) await supabase.storage.from(PHOTO_BUCKET).remove([plant.photo_path]);
-  await updatePlant(uid, plant.id, { scan, photo_path: path });
+  const path = `${uid}/${id}-${Date.now().toString(36)}.jpg`;
+  check(await photos().copy(pendingPath(uid, 0), path));
+
+  let plant;
+  if (existing) {
+    const fields = { scan, photo_path: path };
+    // Название меняется вместе со сканом, чтобы русское и латинское не расходились. Кроме случая, когда цветок переименовали вручную.
+    if (!existing.scan || existing.name === existing.scan.name) fields.name = scan.name;
+    await Promise.all([
+      updatePlant(uid, id, fields),
+      existing.photo_path ? photos().remove([existing.photo_path]) : null,
+    ]);
+    plant = { ...existing, ...fields };
+  } else {
+    plant = check(await supabase.from('plants')
+      .insert({ id, user_id: uid, name: scan.name, every: scan.every, scan, photo_path: path }).select().single());
+  }
   await updateUser(uid, { pending_scan: null });
-  return plant;
+  return { plant, isNew: !existing };
+}
+
+// ───── гостевой доступ ─────
+// В ссылке-приглашении лежит share_token хозяина цветов. Кто её открыл, становится гостем (таблица shares).
+// Пока в базе нет таблицы shares, гостевой доступ просто выключен, остальное работает.
+
+let sharesWarned = false;
+function noShares(error) {
+  if (!sharesWarned) console.error('Гостевой доступ выключен: в базе нет таблицы shares. Выполни supabase/schema.sql.', error.message);
+  sharesWarned = true;
+  return [];
+}
+
+export async function shareToken(uid, reset = false) {
+  if (!reset) {
+    const user = await getUser(uid);
+    if (user?.share_token) return user.share_token;
+  }
+  const token = crypto.randomBytes(9).toString('base64url');
+  await updateUser(uid, { share_token: token });
+  return token;
+}
+
+// Гость открыл ссылку. Возвращает { owner, self } или null, если ссылка недействительна.
+export async function acceptInvite(guestId, token) {
+  const owner = check(await supabase.from('users').select('id, name, chat_id').eq('share_token', token).maybeSingle());
+  if (!owner) return null;
+  if (owner.id === guestId) return { owner, self: true };
+  const added = check(await supabase.from('shares')
+    .upsert({ owner_id: owner.id, guest_id: guestId }, { onConflict: 'owner_id,guest_id', ignoreDuplicates: true }).select());
+  return { owner, self: false, already: !added.length };
+}
+
+// Кому человек дал доступ к своим цветам: [{ id, name }].
+export async function guestsOf(ownerId) {
+  return check(await supabase.from('shares').select('guest_id, guest:users!shares_guest_id_fkey(name)')
+    .eq('owner_id', ownerId).order('created_at'))
+    .map((r) => ({ id: r.guest_id, name: r.guest?.name || 'Без имени' }));
+}
+
+// Чьи цветы человеку доверили: [{ id, name }].
+export async function gardensOf(guestId) {
+  const { data, error } = await supabase.from('shares').select('owner_id, owner:users!shares_owner_id_fkey(name)')
+    .eq('guest_id', guestId).order('created_at');
+  if (error) return noShares(error);
+  return data.map((r) => ({ id: r.owner_id, name: r.owner?.name || 'Без имени' }));
+}
+
+// Все доступы разом, для утренних и вечерних напоминалок.
+export async function allShares() {
+  const { data, error } = await supabase.from('shares').select('owner_id, guest_id, owner:users!shares_owner_id_fkey(name)');
+  if (error) return noShares(error);
+  return data.map((r) => ({ owner: r.owner_id, guest: r.guest_id, name: r.owner?.name || 'Без имени' }));
+}
+
+export async function removeShare(ownerId, guestId) {
+  check(await supabase.from('shares').delete().eq('owner_id', ownerId).eq('guest_id', guestId));
 }

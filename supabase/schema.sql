@@ -8,8 +8,10 @@ create table if not exists users (
   pending_scan jsonb,                 -- последний скан, который ещё не сохранили
   reminded_morning date,
   reminded_evening date,
+  share_token text unique,            -- ссылка-приглашение в свои цветы
   created_at timestamptz not null default now()
 );
+alter table users add column if not exists share_token text unique;
 
 create table if not exists plants (
   id text primary key,
@@ -28,10 +30,20 @@ create table if not exists waterings (
   primary key (plant_id, day)
 );
 
+-- Гостевой доступ: хозяин поделился цветами, гость видит их, отмечает полив и получает напоминалки.
+create table if not exists shares (
+  owner_id bigint not null references users(id) on delete cascade,
+  guest_id bigint not null references users(id) on delete cascade,
+  created_at timestamptz not null default now(),
+  primary key (owner_id, guest_id)
+);
+create index if not exists shares_guest_id on shares(guest_id);
+
 -- Доступ только у сервера (по секретному ключу service_role), снаружи таблицы закрыты.
 alter table users enable row level security;
 alter table plants enable row level security;
 alter table waterings enable row level security;
+alter table shares enable row level security;
 
 -- Публичная корзина для фото цветов.
 insert into storage.buckets (id, name, public) values ('photos', 'photos', true)

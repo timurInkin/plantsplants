@@ -3,6 +3,7 @@
 import { config } from './config.js';
 import { todayLocal } from './dates.js';
 import { lookUpReferences } from './references.js';
+import { step } from './timing.js';
 
 // Роль для обеих моделей: специалист, который смотрит на растение как ботаник и фитопатолог,
 // но отвечает коротко и по делу, без лекций.
@@ -165,15 +166,22 @@ function extras(references, note) {
 }
 
 // images — одно или несколько фото одного растения; note — подпись человека к фото.
+// Справочники и модель для фото работают одновременно, чтобы не ждать их по очереди:
+// подсказки Pl@ntNet и Perenual получает модель, которая пишет вывод.
 export async function scanPhoto(images, note = '') {
   if (!config.llmApiKey) throw new Error('Сканер пока не подключён. Полив и напоминалки работают.');
   images = [].concat(images);
   const pics = images.map((b) => ({ type: 'image_url', image_url: { url: 'data:image/jpeg;base64,' + Buffer.from(b).toString('base64') } }));
-  const refs = await lookUpReferences(images);
-  const extra = extras(refs.text, note);
-  const scan = !config.llmTextModel
-    ? await verdict(config.llmVisionModel, [{ type: 'text', text: SCAN_PROMPT + extra }, ...pics])
-    : await verdict(config.llmTextModel, ADVISE_PROMPT(await look([{ type: 'text', text: LOOK_PROMPT + extra }, ...pics]), extra));
+  const refsJob = step('справочники', lookUpReferences(images));
+  let scan, refs;
+  if (!config.llmTextModel) {
+    refs = await refsJob;
+    scan = await step('модель', verdict(config.llmVisionModel, [{ type: 'text', text: SCAN_PROMPT + extras(refs.text, note) }, ...pics]));
+  } else {
+    const seenJob = step('модель для фото', look([{ type: 'text', text: LOOK_PROMPT + extras('', note) }, ...pics]));
+    [refs] = await Promise.all([refsJob, seenJob]);
+    scan = await step('модель для вывода', verdict(config.llmTextModel, ADVISE_PROMPT(await seenJob, extras(refs.text, note))));
+  }
   if (refs.identified) scan.identified = refs.identified;
   // Полив держим в разумных пределах справочника: модель может сдвинуть его под горшок, но не в разы.
   if (refs.every) {
