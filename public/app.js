@@ -316,8 +316,8 @@ function app() {
       if (scan.lastPreview) shots[shots.length - 1] = scan.lastPreview;
       h += gallery('scan', shots, slide);
     } else {
-      h += '<section class="hero-photo"><span class="photo"><span class="frame"><img src="' + scan.preview + '" alt="">' +
-        (scan.status === 'loading' ? '<span class="scanning"><i></i></span>' : '') + '</span></span></section>';
+      h += '<section class="hero-photo"><span class="photo"><img src="' + scan.preview + '" alt=""></span>' +
+        (scan.status === 'loading' ? '<span class="scanning"><i></i></span>' : '') + '</section>';
     }
     if (scan.status === 'loading') {
       return h + headline('Смотрю…', scan.detail ? 'деталь вместе с фото цветка, минуту-полторы' : scanMore ? 'вместе с прошлыми фото, минуту-полторы' : 'обычно минуту-полторы') +
