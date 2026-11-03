@@ -72,25 +72,32 @@ async function api(uid, path, req) {
     const job = { id: crypto.randomBytes(6).toString('hex'), status: 'working' };
     scanJobs.set(uid, job);
     track('скан из приложения', () => scanForUser(uid, bytes, '', more, false, (text) => { job.stage = text; }, plant)).then(
-      (r) => Object.assign(job, { status: 'done', scan: r.scan, photos: r.photos }),
+      (r) => Object.assign(job, { status: 'done', scan: r.scan, photos: r.photos, shots: db.pendingShots(uid, r.photos, r.at) }),
       (e) => {
         if (!e.status) console.error('Скан из приложения не удался', e);
         Object.assign(job, { status: 'error', error: e.message || 'Что-то сломалось' });
       });
     return { job: job.id };
   }
-  if (path === '/api/scan/undo') return db.undoPending(uid);
+  if (path === '/api/scan/undo') {
+    const r = await db.undoPending(uid);
+    return { ...r, shots: db.pendingShots(uid, r.photos, r.at) };
+  }
   if (path === '/api/scan/status') {
     const job = scanJobs.get(uid);
     const id = new URL(req.url, 'http://x').searchParams.get('job');
     if (!job || job.id !== id) throw fail('Скан прервался, сфоткай ещё раз');
     if (job.status === 'working') return { status: 'working', stage: job.stage || '' };
     if (job.status === 'error') return { status: 'error', error: job.error };
-    return { status: 'done', scan: job.scan, photos: job.photos };
+    return { status: 'done', scan: job.scan, photos: job.photos, shots: job.shots };
   }
 
   const body = JSON.parse((await readBody(req, 100_000)).toString() || '{}');
 
+  if (path === '/api/scan/drop') {
+    const r = await db.dropPending(uid, Number(body.i));
+    return { ...r, shots: db.pendingShots(uid, r.photos, r.at) };
+  }
   if (path === '/api/scan/save') {
     const { plant } = await db.savePending(uid, body.target);
     return { ...(await db.buildState(uid)), saved: plant.id };
@@ -127,6 +134,8 @@ async function api(uid, path, req) {
     await db.updatePlant(uid, plant.id, fields);
   } else if (path === '/api/plant/delete') {
     await db.deletePlant(uid, plant);
+  } else if (path === '/api/plant/detail/delete') {
+    await db.deleteDetail(uid, plant, Number(body.i));
   } else {
     return null;
   }

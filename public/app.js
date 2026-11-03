@@ -50,6 +50,7 @@ function app() {
   let scan = null;          // { status: 'loading' | 'done' | 'error', result, preview, error, target, started }
   let share = null;         // { status: 'loading' | 'done' | 'error', link, guests, error }
   let pickDay = null;       // у какого цветка открыт выбор дня последнего полива
+  const plantSlides = {};   // какое фото открыто в галерее карточки цветка: { id: номер }
   let busy = false;
 
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -144,6 +145,29 @@ function app() {
       (POT[s.pot] ? chip(POT[s.pot][0], POT[s.pot][1], 'potted_plant') : '') + '</div>';
   }
 
+  // Галерея из нескольких фото: листаются вбок, точки под ней показывают, какое открыто.
+  // key — чья галерея: 'scan' или id цветка; slide — какое фото открыто.
+  function gallery(key, urls, slide) {
+    return '<section class="gallery"><div class="slides" data-gallery="' + esc(key) + '" data-slide="' + slide + '">' +
+      urls.map((u) => '<div class="slide"><span class="photo"><img src="' + esc(u) + '" alt=""></span></div>').join('') + '</div>' +
+      '<div class="dots">' + urls.map((_, i) => '<button data-slide-to="' + i + '" data-gallery="' + esc(key) + '" class="' + (i === slide ? 'on' : '') + '" aria-label="Фото ' + (i + 1) + '"></button>').join('') + '</div></section>';
+  }
+
+  // Разбор одного доснятого фото: что на нём, что это значит, что делать. remove — атрибуты кнопки «Убрать это фото».
+  function detailCard(d, k, total, remove) {
+    d = d || {};
+    let h = (d.seen || d.means)
+      ? '<section class="card"><div class="card-head"><div><h3>На этом фото</h3><p>фото ' + (k + 1) + ' из ' + total + '</p></div></div><ul class="facts">' +
+        (d.seen ? fact('eco', d.seen) : '') + (d.means ? fact('lightbulb', d.means) : '') + '</ul></section>'
+      : '<section class="card empty-card"><p>Про это фото отдельно сказать нечего, оно учтено в общем выводе на первом фото.</p></section>';
+    if (d.todo && d.todo.length) {
+      h += '<section class="card todo"><div class="card-head"><div><h3>Что с этим делать</h3></div></div><ul class="facts">' +
+        d.todo.map((t) => fact('arrow_right_alt', t)).join('') + '</ul></section>';
+    }
+    if (remove) h += '<button class="link-btn" ' + remove + '>' + ms('delete') + 'Убрать это фото</button>';
+    return h;
+  }
+
   function todoCard(s) {
     if (!s.todo.length) return '';
     return '<section class="card todo"><div class="card-head"><div><h3>Сделать</h3></div></div><ul class="facts">' +
@@ -221,8 +245,17 @@ function app() {
     const s = p.scan;
     const w = when(p);
     let h = '<div class="topbar"><button class="circle" data-go="plants">' + ms('arrow_back') + '</button></div>';
-    h += '<section class="hero-photo">' + pic(p, 'photo') + '</section>';
-    h += headline(p.name, s && s.latin ? s.latin : '');
+    // Доснятые фото листаются вбок. Под каждым его разбор, под первым — вся карточка.
+    const det = s && s.details && p.photo ? s.details : [];
+    if (det.length) {
+      const k = Math.min(plantSlides[p.id] || 0, det.length);
+      h += gallery(p.id, [p.photo, ...det.map((d) => d.photo)], k);
+      h += headline(p.name, s.latin || '');
+      if (k > 0) return h + detailCard(det[k - 1], k, det.length + 1, own() ? 'data-unshot="' + p.id + '" data-i="' + (k - 1) + '"' : '');
+    } else {
+      h += '<section class="hero-photo">' + pic(p, 'photo') + '</section>';
+      h += headline(p.name, s && s.latin ? s.latin : '');
+    }
     if (s) h += scanChips(s);
 
     h += '<section class="card"><div class="card-head"><div><h3>Полив</h3><p>' +
@@ -275,8 +308,17 @@ function app() {
         '<button class="card camera" data-action="shoot"><span class="lens">' + ms('photo_camera') + '</span><b>Сделать фото</b><small>или выбрать из галереи</small></button>';
     }
     let h = '<div class="topbar"><button class="circle" data-action="scan-reset">' + ms('close') + '</button></div>';
-    h += '<section class="hero-photo"><span class="photo"><img src="' + scan.preview + '" alt=""></span>' +
-      (scan.status === 'loading' ? '<span class="scanning"><i></i></span>' : '') + '</section>';
+    // Пока идёт скан, сверху фото, которое только что сняли. Когда готово и фото несколько, они листаются вбок,
+    // и открыто последнее: под ним разбор именно этого фото.
+    const shots = scan.status === 'done' && scan.shots && scan.shots.length > 1 ? scan.shots.slice() : null;
+    const slide = shots ? Math.min(scan.slide || 0, shots.length - 1) : 0;
+    if (shots) {
+      if (scan.lastPreview) shots[shots.length - 1] = scan.lastPreview;
+      h += gallery('scan', shots, slide);
+    } else {
+      h += '<section class="hero-photo"><span class="photo"><img src="' + scan.preview + '" alt=""></span>' +
+        (scan.status === 'loading' ? '<span class="scanning"><i></i></span>' : '') + '</section>';
+    }
     if (scan.status === 'loading') {
       return h + headline('Смотрю…', scan.detail ? 'деталь вместе с фото цветка, минуту-полторы' : scanMore ? 'вместе с прошлыми фото, минуту-полторы' : 'обычно минуту-полторы') +
         '<p class="wait-line"><b id="elapsed">' + clock(scan.started) + '</b><span>' + esc(scan.stage || 'Определяю вид, разглядываю листья, грунт и горшок…') + '</span></p>';
@@ -285,10 +327,14 @@ function app() {
       return h + headline('Не получилось', scan.error) + '<button class="pill" data-action="shoot"><span>Сфоткать ещё раз</span><i>' + ms('photo_camera') + '</i></button>';
     }
     const s = scan.result;
-    h += headline(s.name, s.latin) + scanChips(s);
-    if (s.confidence === 'low') h += '<p class="note">Не до конца уверена, что это он. Можно сфоткать поближе.</p>';
-    h += '<section class="card">' + scanFacts(s) + '</section>' + todoCard(s);
-    if (s.needPhotos && s.needPhotos.length) {
+    if (slide > 0) {
+      h += headline(s.name, s.latin) + detailCard((s.details || [])[slide - 1], slide, shots.length, 'data-action="drop-shot" data-i="' + slide + '"');
+    } else {
+      h += headline(s.name, s.latin) + scanChips(s);
+      if (s.confidence === 'low') h += '<p class="note">Не до конца уверена, что это он. Можно сфоткать поближе.</p>';
+      h += '<section class="card">' + scanFacts(s) + '</section>' + todoCard(s);
+    }
+    if (slide === 0 && s.needPhotos && s.needPhotos.length) {
       h += '<section class="card"><div class="card-head"><div><h3>Чтобы ответить точнее</h3><p>' +
         (scan.photos > 1 ? 'учла ' + scan.photos + ' фото, ' : '') + 'сфоткай ещё</p></div></div><ul class="facts">' +
         s.needPhotos.map((t) => fact('add_a_photo', t)).join('') + '</ul>' +
@@ -362,7 +408,31 @@ function app() {
       (t[0] === 'scan' ? ms('photo_camera') : '') + t[1] + '</button>').join('') +
       '<button class="theme-btn" data-action="theme" aria-label="' + (isDark() ? 'Светлая тема' : 'Тёмная тема') + '">' + ms(isDark() ? 'light_mode' : 'dark_mode') + '</button>' +
       '</nav><main>' + view + '</main>');
+    syncGalleries();
   }
+
+  // Галерея прокручена на открытое фото. Если человек листает сам, ловим, на каком фото он остановился.
+  function syncGalleries() {
+    root.querySelectorAll('.slides').forEach((g) => {
+      const k = Number(g.dataset.slide) || 0;
+      if (g.clientWidth && Math.round(g.scrollLeft / g.clientWidth) !== k) g.scrollLeft = k * g.clientWidth;
+    });
+  }
+  function showSlide(key, k, scrollTo) {
+    if (key === 'scan') { if (!scan) return; scan.slide = k; } else plantSlides[key] = k;
+    render();
+    if (scrollTo) window.scrollTo(0, 0);
+  }
+  let slideTimer = null;
+  root.addEventListener('scroll', (e) => {
+    const g = e.target;
+    if (!g.classList || !g.classList.contains('slides')) return;
+    clearTimeout(slideTimer);
+    slideTimer = setTimeout(() => {
+      const k = Math.round(g.scrollLeft / (g.clientWidth || 1));
+      if (k !== Number(g.dataset.slide)) showSlide(g.dataset.gallery, k);
+    }, 120);
+  }, true);
 
   // Экран не перерисовывается целиком: новая разметка сравнивается с той, что уже на экране,
   // и меняются только отличающиеся кусочки (галочка, надпись на кнопке, строчка). Фото и прокрутка остаются на месте.
@@ -519,24 +589,25 @@ function app() {
     try {
       const img = await shrink(file);
       // При досъёмке сверху остаётся первое, основное фото.
-      // При фото детали сверху фото самого цветка.
-      const keep = scanMore && scan && scan.preview;
+      // Сверху всегда фото, которое только что сняли. Прошлый результат помним: если досъёмка не удастся, вернём его.
+      const keep = scanMore && scan && scan.result ? scan : null;
       const plant = scanDetail && byId(scanTarget);
-      const detail = !!plant || !!(keep && scan.detail);
+      const detail = !!plant || !!(keep && keep.detail);
       scan = {
-        status: 'loading', preview: keep ? scan.preview : plant && plant.photo ? plant.photo : img.preview,
-        prevResult: keep ? scan.result : null, prevPhotos: keep ? scan.photos : 0, target: scanTarget, detail, started: Date.now(),
+        status: 'loading', preview: img.preview, lastPreview: img.preview, prev: keep,
+        target: scanTarget, detail, started: Date.now(),
       };
       go('scan');
       const { job } = await api('/api/scan' + (scanMore ? '?more=1' : plant ? '?plant=' + encodeURIComponent(plant.id) : ''), img.blob, true);
       const res = await waitForScan(job, isCurrent);
       if (!res || !isCurrent()) return;
-      scan = { ...scan, status: 'done', result: res.scan, photos: res.photos || 1 };
+      const n = res.photos || 1;
+      scan = { ...scan, status: 'done', result: res.scan, photos: n, shots: res.shots || [], slide: n - 1, prev: null };
     } catch (e) {
       if (!isCurrent()) return;
       // Досъёмка не удалась: оставляем прошлый результат, он на сервере тоже не тронут.
-      if (scan && scan.prevResult) {
-        scan = { ...scan, status: 'done', result: scan.prevResult, photos: scan.prevPhotos };
+      if (scan && scan.prev) {
+        scan = { ...scan.prev, status: 'done' };
         if (route === 'scan') render();
         return alert('Не получилось доснять: ' + e.message + ' Оставила прошлый результат.');
       }
@@ -557,7 +628,16 @@ function app() {
     if (!b) return;
     const d = b.dataset;
     if (d.go) return go(d.go);
-    if (d.open) return go('plant/' + d.open);
+    if (d.open) { delete plantSlides[d.open]; return go('plant/' + d.open); }
+    if (d.slideTo) return showSlide(d.gallery, Number(d.slideTo), true);
+    if (d.unshot) {
+      if (!confirm('Убрать это фото и его разбор?')) return;
+      haptic();
+      const k = Number(d.i);
+      await act(() => api('/api/plant/detail/delete', { plant: d.unshot, i: k }), b);
+      plantSlides[d.unshot] = k + 1; // открываем следующее фото, а если убрали последнее, то предыдущее
+      return render();
+    }
     if (d.garden) return switchGarden(Number(d.garden));
     if (d.water) return water(d.water);
     if (d.pickday) { pickDay = pickDay === d.pickday ? null : d.pickday; return render(); }
@@ -620,8 +700,19 @@ function app() {
       b.classList.add('wait');
       try {
         const r = await api('/api/scan/undo', {});
-        scan = { ...scan, status: 'done', result: r.scan, photos: r.photos || 1 };
+        scan = { ...scan, status: 'done', result: r.scan, photos: r.photos || 1, shots: r.shots || [], slide: 0, lastPreview: null };
         render(); window.scrollTo(0, 0);
+      } catch (err) { b.classList.remove('wait'); alert(err.message); }
+      return;
+    }
+    if (d.action === 'drop-shot') {
+      if (!confirm('Убрать это фото и его разбор? Общий вывод останется.')) return;
+      haptic();
+      b.classList.add('wait');
+      try {
+        const r = await api('/api/scan/drop', { i: Number(d.i) });
+        scan = { ...scan, result: r.scan, photos: r.photos, shots: r.shots || [], slide: Math.min(Number(d.i), r.photos - 1), lastPreview: null };
+        render();
       } catch (err) { b.classList.remove('wait'); alert(err.message); }
       return;
     }

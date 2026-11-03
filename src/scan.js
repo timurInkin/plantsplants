@@ -24,7 +24,8 @@ const SCHEMA = `Ответь ТОЛЬКО JSON без пояснений и бе
   "water_text": "критерий полива для этого вида: на сколько см должен просохнуть грунт или как выглядят листья, до 12 слов",
   "light": "свет для этого вида: тип и расстояние от окна или люксы, до 10 слов",
   "todo": ["конкретные действия с цифрами и названиями (препарат, субстрат, размер горшка), до 3 пунктов, по 8–15 слов; пустой массив, если всё хорошо"],
-  "need_photos": ["что ещё сфоткать, чтобы ответить точно: одно простое действие простыми словами, по 5–12 слов, до 2 пунктов; пустой массив, если всего хватает"]
+  "need_photos": ["что ещё сфоткать, чтобы ответить точно: одно простое действие простыми словами, по 5–12 слов, до 2 пунктов; пустой массив, если всего хватает"],
+  "photos": [{"n": номер фото: 2, 3 или 4, "seen": "что крупно на этом фото и что с этим не так, до 12 слов", "means": "что это значит: причина и насколько это серьёзно, до 25 слов", "todo": ["что сделать именно с этим, до 2 пунктов по 6–14 слов; пустой массив, если ничего не надо"]}]
 }
 Правила:
 - Только то, что нужно для ухода и лечения. Никакой истории, родины, ботанических справок, токсичности.
@@ -37,6 +38,8 @@ const SCHEMA = `Ответь ТОЛЬКО JSON без пояснений и бе
   Пиши как просьбу другу, без терминов: «сфоткай горшок снизу: видно ли корни в дырках», а не «оценить корни в дренаже».
   Пока фото нет, в соответствующем поле честно скажи, что не видно, и ставь pot unknown, если про горшок нельзя сказать уверенно.
 - В todo не советуй вынимать растение и смотреть корни, если нет явных признаков беды с корнями (вялость при мокром грунте, запах, корни лезут из дырок).
+- photos: если фото больше одного, по объекту на каждое фото, начиная со второго (первое — общий план, его разбор в остальных полях). Если фото одно, пустой массив.
+  Пиши про то, что видно именно на этом фото. Например, на фото один жёлтый лист: это перелив, нехватка света или старый лист отмирает, и срезать ли его.
 - status: ok — здоровое и растёт; watch — есть мелочи или ранние симптомы; help — нужно лечить сейчас.
 - pot: small — корни в дренаже или ком плотно оплетён, крона намного шире горшка; big — горшок явно больше корневой системы (риск закисания); unknown — горшка не видно.
 - Пиши коротко и спокойно, по-разговорному, без канцелярита, но точно, как специалист.`;
@@ -64,7 +67,8 @@ const LOOK_PROMPT = `${ROLE}
    - Грунт: сухой или влажный по цвету, корка, белый или зелёный налёт, плесень, тип субстрата (торф, кора, перлит).
    - Горшок: материал, примерный диаметр относительно кроны и стеблей, видны ли корни сверху или в дренаже.
 4. Условия, если видно: свет (прямое солнце, рассеянный, тень), близость к окну или батарее.
-Пропускай пункты, о которых на фото ничего не сказать.`;
+5. Если фото несколько: для каждого фото, начиная со второго, отдельная строка «Фото N: что на нём крупно и какие на нём симптомы».
+Пропускай пункты, о которых на фото ничего не сказать. На каждое фото, начиная со второго, можно ещё до 40 слов.`;
 
 const ADVISE_PROMPT = (seen, extra) => `${ROLE}
 Вот заметка коллеги, который смотрел на фото растения:
@@ -100,6 +104,10 @@ export function normalizeScan(r) {
     light: cut(r.light, 100),
     todo: (Array.isArray(r.todo) ? r.todo : []).map((t) => cut(t, 160)).filter(Boolean).slice(0, 3),
     needPhotos: (Array.isArray(r.need_photos) ? r.need_photos : []).map((t) => cut(t, 120)).filter(Boolean).slice(0, 2),
+    details: (Array.isArray(r.photos) ? r.photos : []).filter((x) => x && typeof x === 'object').map((x) => ({
+      n: Math.round(Number(x.n)) || 0, seen: cut(x.seen, 140), means: cut(x.means, 260),
+      todo: (Array.isArray(x.todo) ? x.todo : []).map((t) => cut(t, 160)).filter(Boolean).slice(0, 2),
+    })),
     date: todayLocal(),
   };
 }
@@ -229,10 +237,17 @@ export async function scanPhoto(images, note = '', onStage = null, prior = null,
     say(guess + 'Пишу вывод и советы, ещё немного…');
     scan = await step('модель для вывода', verdict(config.llmTextModel, ADVISE_PROMPT(await seenJob, extras(refs.text, note, images.length, prior, false, detail))));
   }
-  if (refs.identified) {
+  scan.details = alignDetails(scan.details, images.length);
+  const genus = (l) => String(l || '').trim().split(/\s+/)[0].toLowerCase();
+  if (prior?.latin && genus(scan.latin) === genus(prior.latin)) {
+    // Вид уже определили по первым фото. Новые фото обычно крупные планы, по ним Pl@ntNet узнаёт хуже,
+    // поэтому оставляем то определение и ту уверенность, а не пугаем «не уверена, что это он».
+    delete scan.identified;
+    if (prior.identified) scan.identified = prior.identified;
+    if (prior.confidence) scan.confidence = prior.confidence;
+  } else if (refs.identified) {
     scan.identified = refs.identified;
     // Модель не согласилась с Pl@ntNet по роду: показываем оба мнения и честно снижаем уверенность.
-    const genus = (l) => String(l || '').trim().split(/\s+/)[0].toLowerCase();
     if (refs.identified.score >= 0.25 && genus(scan.latin) !== genus(refs.identified.latin)) {
       scan.identified.disputed = true;
       scan.confidence = 'low';
@@ -244,6 +259,17 @@ export async function scanPhoto(images, note = '', onStage = null, prior = null,
     scan.every = Math.min(hi, Math.max(lo, scan.every));
   }
   return scan;
+}
+
+// Разбор по каждому фото, начиная со второго, ровно по числу фото. Модель нумерует их сама: если номера странные, берём по порядку.
+function alignDetails(details, count) {
+  const ns = details.map((d) => d.n);
+  const byNumber = ns.every((n) => n >= 2 && n <= count) && new Set(ns).size === ns.length;
+  const empty = { seen: '', means: '', todo: [] };
+  return Array.from({ length: Math.max(0, count - 1) }, (_, i) => {
+    const d = (byNumber ? details.find((x) => x.n === i + 2) : details[i]) || empty;
+    return { seen: d.seen, means: d.means, todo: d.todo };
+  });
 }
 
 const STATUS = { ok: 'всё ок', watch: 'присмотреться', help: 'подлечить' };
@@ -263,6 +289,12 @@ export function scanText(s) {
     lines.push(`${s.identified.disputed ? `${s.identified.source} думает иначе` : `Вид по ${s.identified.source}`}: <i>${html(s.identified.latin)}</i>, ${Math.round(s.identified.score * 100)}%`);
   }
   if (s.todo.length) lines.push('', '<b>Сделать:</b>', ...s.todo.map((t) => '• ' + html(t)));
+  (s.details || []).forEach((d, i) => {
+    if (!d.seen && !d.means) return;
+    lines.push('', `📷 <b>Фото ${i + 2}:</b> ${html(d.seen)}`);
+    if (d.means) lines.push(html(d.means));
+    lines.push(...d.todo.map((t) => '• ' + html(t)));
+  });
   if (s.needPhotos?.length) {
     lines.push('', '📸 <b>Чтобы ответить точнее, пришли ещё:</b>', ...s.needPhotos.map((t) => '• ' + html(t)),
       'Просто отправь следующим сообщением, я учту все фото вместе.');

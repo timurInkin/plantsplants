@@ -30,26 +30,29 @@ export async function scanForUser(uid, bytes, note = '', more = false, auto = tr
   const scan = await scanPhoto(images, note, onStage, join ? prev : null, detail);
   await upload;
   // Прошлый результат храним: если досъёмка всё испортила, к нему можно вернуться.
-  await setPending(uid, detail ? { ...scan, detail } : scan, images.length, join ? prev : null);
-  return { scan, photos: images.length };
+  const at = await setPending(uid, detail ? { ...scan, detail } : scan, images.length, join ? prev : null);
+  return { scan, photos: images.length, at };
 }
 
 // Фото детали к цветку из коллекции: пятно, лист снизу, грунт. Сканер смотрит его вместе с основным фото цветка
-// и знает, что за растение, поэтому заново вид не определяет, а обновляет состояние и советы.
+// и деталями, доснятыми раньше, и знает, что за растение: заново вид не определяет, а обновляет состояние и советы.
 // Основное фото становится первым фото скана, так что после сохранения в карточке остаётся оно, а не деталь.
 // «Вернуть прошлый результат» вернёт то, что было в карточке.
 async function detailScan(uid, plantId, bytes, note, onStage) {
+  const fail = (m) => Object.assign(new Error(m), { status: 400 });
   const plant = await getPlant(uid, plantId);
-  if (!plant) throw Object.assign(new Error('Нет такого цветка'), { status: 400 });
-  const base = plant.photo_path ? await downloadPhoto(plant.photo_path) : null;
-  const images = base ? [base, bytes] : [bytes];
-  const upload = Promise.all([base && uploadPending(uid, 0, base), uploadPending(uid, images.length - 1, bytes)]);
+  if (!plant) throw fail('Нет такого цветка');
+  const old = (plant.scan?.details || []).filter((d) => d.path);
+  if (old.length + 2 > MAX_SCAN_PHOTOS) throw fail(`В карточке уже ${old.length} фото деталей. Убери одно, чтобы добавить новое.`);
+  const had = (await Promise.all([plant.photo_path, ...old.map((d) => d.path)].map((p) => (p ? downloadPhoto(p) : null)))).filter(Boolean);
+  const images = [...had, bytes];
+  const upload = Promise.all(images.map((b, i) => uploadPending(uid, i, b)));
   upload.catch(() => {});
-  const prior = plant.scan ? { ...plant.scan, photos: 1 } : null;
+  const prior = plant.scan ? { ...plant.scan, photos: had.length || 1 } : null;
   const scan = await scanPhoto(images, note, onStage, prior, true);
   await upload;
-  await setPending(uid, { ...scan, detail: true }, images.length, prior);
-  return { scan, photos: images.length };
+  const at = await setPending(uid, { ...scan, detail: true }, images.length, prior);
+  return { scan, photos: images.length, at };
 }
 
 // Кнопки «Когда был последний полив?»: сегодня, вчера и ещё пять дней назад.
