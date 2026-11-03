@@ -181,19 +181,28 @@ function withStrict(content) {
 }
 
 // Подсказки к промпту: справочные сервисы, комментарий человека к фото и сколько фото уже прислали.
-function extras(references, note, count = 1) {
+// prior — что показал скан по первым фото, если эти фото досняты к нему.
+function extras(references, note, count = 1, prior = null, forLook = false) {
   let t = '';
-  if (count > 1) t += `\nЭто уже ${count} фото: человек досылал их по просьбе. Ещё фото проси, только если без них вывод будет неверным.\n`;
+  if (count > 1) {
+    t += '\nПервое фото основное для определения вида. Остальные досняты по просьбе: горшок, грунт, листья поближе.';
+    t += forLook ? '\n' : ` Это уже ${count} фото, ещё фото проси, только если без них вывод будет неверным.\n`;
+  }
+  if (prior?.latin) {
+    t += `\nПо первым фото растение уже определено как ${prior.name} (${prior.latin}). Не меняй вид, если на новых фото нет явного признака другого вида: ` +
+      'досъёмка нужна, чтобы уточнить состояние, горшок и грунт.\n';
+  }
   if (references) t += `\nСправочные данные по этим фото:\n${references}\n`;
   if (note) t += `\nХозяйка растения пишет: «${String(note).slice(0, 500)}». Учти это.\n`;
   return t;
 }
 
 // images — одно или несколько фото одного растения; note — подпись человека к фото;
-// onStage(text) — по ходу скана сообщает, что сейчас происходит («похоже, это …», «пишу советы»), чтобы ждать было не вслепую.
+// onStage(text) — по ходу скана сообщает, что сейчас происходит («похоже, это …», «пишу советы»), чтобы ждать было не вслепую;
+// prior — результат скана по первым фото, если новые фото досняты к нему.
 // Справочники и модель для фото работают одновременно, чтобы не ждать их по очереди:
 // подсказки Pl@ntNet и Perenual получает модель, которая пишет вывод.
-export async function scanPhoto(images, note = '', onStage = null) {
+export async function scanPhoto(images, note = '', onStage = null, prior = null) {
   if (!config.llmApiKey) throw new Error('Сканер пока не подключён. Полив и напоминалки работают.');
   images = [].concat(images);
   const pics = images.map((b) => ({ type: 'image_url', image_url: { url: 'data:image/jpeg;base64,' + Buffer.from(b).toString('base64') } }));
@@ -209,14 +218,22 @@ export async function scanPhoto(images, note = '', onStage = null) {
   let scan, refs;
   if (!config.llmTextModel) {
     refs = await refsJob;
-    scan = await step('модель', verdict(config.llmVisionModel, [{ type: 'text', text: SCAN_PROMPT + extras(refs.text, note, images.length) }, ...pics]));
+    scan = await step('модель', verdict(config.llmVisionModel, [{ type: 'text', text: SCAN_PROMPT + extras(refs.text, note, images.length, prior) }, ...pics]));
   } else {
-    const seenJob = step('модель для фото', look([{ type: 'text', text: LOOK_PROMPT + extras('', note) }, ...pics]));
+    const seenJob = step('модель для фото', look([{ type: 'text', text: LOOK_PROMPT + extras('', note, images.length, prior, true) }, ...pics]));
     [refs] = await Promise.all([refsJob, seenJob]);
     say(guess + 'Пишу вывод и советы, ещё немного…');
-    scan = await step('модель для вывода', verdict(config.llmTextModel, ADVISE_PROMPT(await seenJob, extras(refs.text, note, images.length))));
+    scan = await step('модель для вывода', verdict(config.llmTextModel, ADVISE_PROMPT(await seenJob, extras(refs.text, note, images.length, prior))));
   }
-  if (refs.identified) scan.identified = refs.identified;
+  if (refs.identified) {
+    scan.identified = refs.identified;
+    // Модель не согласилась с Pl@ntNet по роду: показываем оба мнения и честно снижаем уверенность.
+    const genus = (l) => String(l || '').trim().split(/\s+/)[0].toLowerCase();
+    if (refs.identified.score >= 0.25 && genus(scan.latin) !== genus(refs.identified.latin)) {
+      scan.identified.disputed = true;
+      scan.confidence = 'low';
+    }
+  }
   // Полив держим в разумных пределах справочника: модель может сдвинуть его под горшок, но не в разы.
   if (refs.every) {
     const lo = Math.max(1, Math.floor(refs.every.min * 0.5)), hi = Math.ceil(refs.every.max * 1.5);
@@ -237,7 +254,9 @@ export function scanText(s) {
   if (s.pot !== 'unknown') lines.push(`Горшок: ${html(s.potText || POT[s.pot])}`);
   lines.push(`Полив: раз в ${s.every} дн.${s.waterText ? ', ' + html(s.waterText) : ''}`);
   if (s.light) lines.push(`Свет: ${html(s.light)}`);
-  if (s.identified) lines.push(`Вид по ${s.identified.source}: <i>${html(s.identified.latin)}</i>, ${Math.round(s.identified.score * 100)}%`);
+  if (s.identified) {
+    lines.push(`${s.identified.disputed ? `${s.identified.source} думает иначе` : `Вид по ${s.identified.source}`}: <i>${html(s.identified.latin)}</i>, ${Math.round(s.identified.score * 100)}%`);
+  }
   if (s.todo.length) lines.push('', '<b>Сделать:</b>', ...s.todo.map((t) => '• ' + html(t)));
   if (s.needPhotos?.length) {
     lines.push('', '📸 <b>Чтобы ответить точнее, пришли ещё:</b>', ...s.needPhotos.map((t) => '• ' + html(t)),

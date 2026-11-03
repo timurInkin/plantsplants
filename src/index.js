@@ -78,6 +78,7 @@ async function api(uid, path, req) {
       });
     return { job: job.id };
   }
+  if (path === '/api/scan/undo') return db.undoPending(uid);
   if (path === '/api/scan/status') {
     const job = scanJobs.get(uid);
     const id = new URL(req.url, 'http://x').searchParams.get('job');

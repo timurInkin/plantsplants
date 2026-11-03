@@ -137,8 +137,18 @@ export async function uploadPending(uid, i, bytes) {
   check(await photos().upload(pendingPath(uid, i), bytes, { contentType: 'image/jpeg', upsert: true }));
 }
 
-export async function setPending(uid, scan, count) {
-  await updateUser(uid, { pending_scan: { ...scan, photos: count, at: Date.now() } });
+export async function setPending(uid, scan, count, prev = null) {
+  const { prev: _older, ...previous } = prev || {};
+  await updateUser(uid, { pending_scan: { ...scan, photos: count, at: Date.now(), ...(prev ? { prev: previous } : {}) } });
+}
+
+// Вернуть результат до последней досъёмки. Последнее фото остаётся в хранилище, но больше не учитывается.
+export async function undoPending(uid) {
+  const prev = (await getUser(uid))?.pending_scan?.prev;
+  if (!prev) throw fail('Прошлого результата уже нет');
+  await updateUser(uid, { pending_scan: { ...prev, at: Date.now() } });
+  const { photos, at: _at, ...scan } = prev;
+  return { scan, photos };
 }
 
 // Фото незавершённого скана, чтобы досланное фото разобрать вместе с ними.
@@ -154,7 +164,7 @@ export async function pendingImages(uid, count) {
 
 export async function savePending(uid, target) {
   const [user, existing] = await Promise.all([getUser(uid), target === 'new' ? null : getPlant(uid, target)]);
-  const { photos: _count, at: _at, ...scan } = user?.pending_scan || {};
+  const { photos: _count, at: _at, prev: _prev, ...scan } = user?.pending_scan || {};
   if (!scan.name) throw fail('Скан потерялся, сфоткай ещё раз');
   if (target !== 'new' && !existing) throw notFound();
 

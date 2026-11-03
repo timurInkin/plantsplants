@@ -4,7 +4,7 @@
 import { EVENING_NUDGE } from './config.js';
 import { todayLocal, addDays, dayLabel, dayShort, validDay } from './dates.js';
 import {
-  touchUser, getUser, getPlants, getPlant, uploadPending, setPending, pendingImages, savePending, sameKind,
+  touchUser, getUser, getPlants, getPlant, uploadPending, setPending, undoPending, pendingImages, savePending, sameKind,
   waterAllDue, setLastWatering, buildState, acceptInvite, gardensOf, MAX_SCAN_PHOTOS,
 } from './db.js';
 import { scanPhoto, scanText } from './scan.js';
@@ -25,9 +25,10 @@ export async function scanForUser(uid, bytes, note = '', more = false, auto = tr
   // Фото кладём в хранилище, пока сканер думает, а не после.
   const upload = uploadPending(uid, images.length - 1, bytes);
   upload.catch(() => {});
-  const scan = await scanPhoto(images, note, onStage);
+  const scan = await scanPhoto(images, note, onStage, join ? prev : null);
   await upload;
-  await setPending(uid, scan, images.length);
+  // Прошлый результат храним: если досъёмка всё испортила, к нему можно вернуться.
+  await setPending(uid, scan, images.length, join ? prev : null);
   return { scan, photos: images.length };
 }
 
@@ -44,6 +45,23 @@ function nextWateringText(day, every) {
   const next = addDays(day, every);
   const today = todayLocal();
   return next <= today ? 'Следующий полив уже пора: проверь грунт пальцем.' : `Следующий: ${dayLabel(next)}.`;
+}
+
+// Ответ на скан с кнопками «куда сохранить». Цветы, на которые скан не похож, сохраняются только после вопроса «точно он?» (кнопка sc?:).
+function scanMessage(scan, photos, plants) {
+  const rows = [[{ text: '＋ Это новый цветок', callback_data: 'sc:new' }]];
+  for (let i = 0; i < plants.length; i += 2) {
+    rows.push(plants.slice(i, i + 2).map((p) => ({
+      text: p.name, callback_data: (sameKind(p, scan) === false ? 'sc?:' : 'sc:') + p.id,
+    })));
+  }
+  if (photos > 1) rows.push([{ text: '↩️ Вернуть прошлый результат', callback_data: 'undo' }]);
+  return {
+    parse_mode: 'HTML',
+    text: (photos > 1 ? `Смотрю на все ${photos} фото вместе.\n\n` : '') + scanText(scan) +
+      (plants.length ? '\n\nЭто новый цветок или кто-то из твоих? Если из твоих, обновлю его фото и скан.' : '\n\nСохранить в твои цветы?'),
+    reply_markup: { inline_keyboard: rows },
+  };
 }
 
 async function handleCallback(cb) {
@@ -83,6 +101,11 @@ async function handleCallback(cb) {
           reply_markup: lastWateringKeyboard(plant.id),
         });
       }
+    } else if (cb.data === 'undo') {
+      // Досъёмка испортила результат: возвращаем то, что было до неё.
+      const [{ scan, photos }, plants] = await Promise.all([undoPending(uid), getPlants(uid)]);
+      await answer('Вернула прошлый результат');
+      await tg('editMessageText', { chat_id, message_id, ...scanMessage(scan, photos, plants) });
     } else if (cb.data.startsWith('wl:')) {
       const [, id, day] = cb.data.split(':');
       const plant = await getPlant(uid, id);
@@ -173,19 +196,7 @@ export async function handleUpdate(update) {
       await reply({ text: 'Не получилось разглядеть 😕 ' + e.message });
       return;
     }
-    // Цветы, на которые скан не похож, сохраняются только после вопроса «точно он?» (кнопка sc?:).
-    const rows = [[{ text: '＋ Это новый цветок', callback_data: 'sc:new' }]];
-    for (let i = 0; i < plants.length; i += 2) {
-      rows.push(plants.slice(i, i + 2).map((p) => ({
-        text: p.name, callback_data: (sameKind(p, scan) === false ? 'sc?:' : 'sc:') + p.id,
-      })));
-    }
-    await reply({
-      parse_mode: 'HTML',
-      text: (photos > 1 ? `Смотрю на все ${photos} фото вместе.\n\n` : '') + scanText(scan) +
-        (plants.length ? '\n\nЭто новый цветок или кто-то из твоих? Если из твоих, обновлю его фото и скан.' : '\n\nСохранить в твои цветы?'),
-      reply_markup: { inline_keyboard: rows },
-    });
+    await reply(scanMessage(scan, photos, plants));
     return;
   }
 

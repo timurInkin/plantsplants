@@ -134,7 +134,7 @@ function app() {
       (s.pot !== 'unknown' ? fact('potted_plant', s.potText || POT[s.pot][0]) : '') +
       fact('water_drop', 'раз в ' + days(s.every) + (s.waterText ? ', ' + s.waterText : '')) +
       (s.light ? fact('light_mode', s.light) : '') +
-      (s.identified ? fact('biotech', 'вид по ' + s.identified.source + ': ' + s.identified.latin + ', ' + Math.round(s.identified.score * 100) + '%') : '') + '</ul>';
+      (s.identified ? fact('biotech', (s.identified.disputed ? s.identified.source + ' думает иначе: ' : 'вид по ' + s.identified.source + ': ') + s.identified.latin + ', ' + Math.round(s.identified.score * 100) + '%') : '') + '</ul>';
   }
 
   function scanChips(s) {
@@ -279,6 +279,9 @@ function app() {
         (scan.photos > 1 ? 'учла ' + scan.photos + ' фото, ' : '') + 'сфоткай ещё</p></div></div><ul class="facts">' +
         s.needPhotos.map((t) => fact('add_a_photo', t)).join('') + '</ul>' +
         '<button class="pill" data-action="shoot-more"><span>Доснять</span><i>' + ms('photo_camera') + '</i></button></section>';
+    }
+    if (scan.photos > 1) {
+      h += '<button class="link-btn" data-action="scan-undo">' + ms('undo') + 'Вернуть прошлый результат, без последнего фото</button>';
     }
     // Куда сохранить. Новый цветок всегда можно выбрать, а обновить карточку, на которую скан не похож, только после вопроса.
     const target = scan.target && byId(scan.target);
@@ -500,7 +503,9 @@ function app() {
     const isCurrent = () => seq === scanSeq;
     try {
       const img = await shrink(file);
-      scan = { status: 'loading', preview: img.preview, target: scanTarget, started: Date.now() };
+      // При досъёмке сверху остаётся первое, основное фото.
+      const keep = scanMore && scan && scan.preview;
+      scan = { status: 'loading', preview: keep ? scan.preview : img.preview, prevResult: keep ? scan.result : null, prevPhotos: keep ? scan.photos : 0, target: scanTarget, started: Date.now() };
       go('scan');
       const { job } = await api('/api/scan' + (scanMore ? '?more=1' : ''), img.blob, true);
       const res = await waitForScan(job, isCurrent);
@@ -508,6 +513,12 @@ function app() {
       scan = { ...scan, status: 'done', result: res.scan, photos: res.photos || 1 };
     } catch (e) {
       if (!isCurrent()) return;
+      // Досъёмка не удалась: оставляем прошлый результат, он на сервере тоже не тронут.
+      if (scan && scan.prevResult) {
+        scan = { ...scan, status: 'done', result: scan.prevResult, photos: scan.prevPhotos };
+        if (route === 'scan') render();
+        return alert('Не получилось доснять: ' + e.message + ' Оставила прошлый результат.');
+      }
       scan = { ...(scan || {}), status: 'error', error: e.message };
     }
     if (route === 'scan') render();
@@ -581,6 +592,16 @@ function app() {
     }
     if (d.action === 'shoot') return shoot(scan && scan.target);
     if (d.action === 'shoot-more') return shoot(scan && scan.target, true);
+    if (d.action === 'scan-undo') {
+      haptic();
+      b.classList.add('wait');
+      try {
+        const r = await api('/api/scan/undo', {});
+        scan = { ...scan, status: 'done', result: r.scan, photos: r.photos || 1 };
+        render(); window.scrollTo(0, 0);
+      } catch (err) { b.classList.remove('wait'); alert(err.message); }
+      return;
+    }
     if (d.action === 'scan-reset') { scan = null; scanSeq++; return go('scan'); }
     if (d.action === 'theme') { haptic(); setTheme(isDark() ? 'light' : 'dark'); return render(); }
     if (d.action === 'water-all') { haptic(); return act(() => api('/api/water-all', {}), b); }
