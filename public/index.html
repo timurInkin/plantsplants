@@ -117,15 +117,15 @@ h3 { margin:0; font-size:19px; font-weight:500; letter-spacing:-.02em; }
 .hero-photo { position:relative; }
 .photo { display:grid; place-items:center; width:100%; aspect-ratio:4/3; border-radius:28px; overflow:hidden; background:var(--card); color:var(--muted); }
 .photo .ms { font-size:44px; }
-/* Фото в карточке цветка и в скане целиком, без обрезки: высота по самому фото, но не выше 68% экрана. */
-.hero-photo .photo:not(.empty) { display:block; aspect-ratio:auto; }
-.hero-photo .photo:not(.empty) img { height:auto; max-height:68vh; object-fit:contain; }
+/* Большое фото в карточке цветка, в скане и в галерее: одна рамка 3:4 на всю ширину, не выше 54% экрана.
+   Фото заполняет рамку целиком и кадрируется по центру. */
+.hero-photo .photo:not(.empty), .gallery .photo { display:block; aspect-ratio:3/4; max-height:54vh; }
+.hero-photo .photo:not(.empty) img, .gallery .photo img { object-fit:cover; object-position:center; }
 /* Несколько фото листаются вбок. Рамка одна на всех, фото целиком, без обрезки. */
 .gallery .slides { display:flex; overflow-x:auto; scroll-snap-type:x mandatory; overscroll-behavior-x:contain; scrollbar-width:none; border-radius:28px; }
 .gallery .slides::-webkit-scrollbar { display:none; }
 .gallery .slide { flex:0 0 100%; scroll-snap-align:center; scroll-snap-stop:always; }
-.gallery .photo { display:block; aspect-ratio:3/4; max-height:54vh; border-radius:0; }
-.gallery .photo img { object-fit:contain; }
+.gallery .photo { border-radius:0; }
 .dots { display:flex; justify-content:center; gap:6px; margin-top:10px; }
 .dots button { width:7px; height:7px; padding:0; border:0; border-radius:4px; background:var(--ring); cursor:pointer; transition:width .2s, background .2s; }
 .dots button.on { width:20px; background:var(--sage); }
