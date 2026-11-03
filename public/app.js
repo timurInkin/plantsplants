@@ -265,7 +265,7 @@ function app() {
       (scan.status === 'loading' ? '<span class="scanning"><i></i></span>' : '') + '</section>';
     if (scan.status === 'loading') {
       return h + headline('Смотрю…', scanMore ? 'вместе с прошлыми фото, минуту-полторы' : 'обычно минуту-полторы') +
-        '<p class="wait-line"><b id="elapsed">' + clock(scan.started) + '</b><span>определяю вид, разглядываю листья, грунт и горшок</span></p>';
+        '<p class="wait-line"><b id="elapsed">' + clock(scan.started) + '</b><span>' + esc(scan.stage || 'Определяю вид, разглядываю листья, грунт и горшок…') + '</span></p>';
     }
     if (scan.status === 'error') {
       return h + headline('Не получилось', scan.error) + '<button class="pill" data-action="shoot"><span>Сфоткать ещё раз</span><i>' + ms('photo_camera') + '</i></button>';
@@ -486,6 +486,7 @@ function app() {
       }
       if (r.status === 'done') return r;
       if (r.status === 'error') throw new Error(r.error);
+      if (r.stage && scan && scan.status === 'loading' && scan.stage !== r.stage) { scan.stage = r.stage; if (route === 'scan') render(); }
     }
     throw new Error('Скан слишком долго думает, попробуй ещё раз');
   }

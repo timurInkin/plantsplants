@@ -36,7 +36,7 @@ function send(res, status, body, type = 'application/json; charset=utf-8') {
 
 // Что можно делать в чужих цветах, которыми поделились: смотреть и отмечать полив.
 const GUEST_OK = new Set(['/api/state', '/api/water', '/api/water/last', '/api/water-all']);
-// Последний скан из приложения у каждого человека: { id, status: working | done | error, scan, photos, error }.
+// Последний скан из приложения у каждого человека: { id, status: working | done | error, stage, scan, photos, error }.
 const scanJobs = new Map();
 
 const fail = (message, extra = {}) => Object.assign(new Error(message), { status: 400, ...extra });
@@ -70,7 +70,7 @@ async function api(uid, path, req) {
     const more = new URL(req.url, 'http://x').searchParams.get('more') === '1';
     const job = { id: crypto.randomBytes(6).toString('hex'), status: 'working' };
     scanJobs.set(uid, job);
-    track('скан из приложения', () => scanForUser(uid, bytes, '', more, false)).then(
+    track('скан из приложения', () => scanForUser(uid, bytes, '', more, false, (text) => { job.stage = text; })).then(
       (r) => Object.assign(job, { status: 'done', scan: r.scan, photos: r.photos }),
       (e) => {
         if (!e.status) console.error('Скан из приложения не удался', e);
@@ -82,7 +82,7 @@ async function api(uid, path, req) {
     const job = scanJobs.get(uid);
     const id = new URL(req.url, 'http://x').searchParams.get('job');
     if (!job || job.id !== id) throw fail('Скан прервался, сфоткай ещё раз');
-    if (job.status === 'working') return { status: 'working' };
+    if (job.status === 'working') return { status: 'working', stage: job.stage || '' };
     if (job.status === 'error') return { status: 'error', error: job.error };
     return { status: 'done', scan: job.scan, photos: job.photos };
   }

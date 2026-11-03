@@ -16,7 +16,7 @@ const html = (s) => String(s ?? '').replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<
 // В чате (auto) новое фото добавляется к прошлому скану и без этого: если бот сам просил доснять
 // (в течение 30 минут) или если фото пришли подряд, пачкой (в течение 2 минут).
 // В приложении для этого есть кнопка, поэтому там новое фото без «Доснять» всегда начинает новый скан.
-export async function scanForUser(uid, bytes, note = '', more = false, auto = true) {
+export async function scanForUser(uid, bytes, note = '', more = false, auto = true, onStage = null) {
   const prev = (await getUser(uid))?.pending_scan;
   const age = prev?.at ? Date.now() - prev.at : Infinity;
   const join = prev?.photos > 0 && prev.photos < MAX_SCAN_PHOTOS &&
@@ -25,7 +25,7 @@ export async function scanForUser(uid, bytes, note = '', more = false, auto = tr
   // Фото кладём в хранилище, пока сканер думает, а не после.
   const upload = uploadPending(uid, images.length - 1, bytes);
   upload.catch(() => {});
-  const scan = await scanPhoto(images, note);
+  const scan = await scanPhoto(images, note, onStage);
   await upload;
   await setPending(uid, scan, images.length);
   return { scan, photos: images.length };
@@ -156,12 +156,20 @@ export async function handleUpdate(update) {
       ? tg('editMessageText', { chat_id: msg.chat.id, message_id: waitId, ...body })
       : tg('sendMessage', { chat_id: msg.chat.id, ...body }));
 
+    // Пока скан идёт, обновляем это сообщение: что уже понятно и что сейчас происходит.
+    let finished = false;
+    const onStage = (text) => {
+      if (waitId && !finished) tg('editMessageText', { chat_id: msg.chat.id, message_id: waitId, text: '🔍 ' + text }).catch(() => {});
+    };
+
     const size = msg.photo.find((ph) => ph.width >= 1000) || msg.photo[msg.photo.length - 1];
     let scan, photos, plants;
     try {
       const bytes = await downloadFile(size.file_id);
-      [{ scan, photos }, plants] = await Promise.all([scanForUser(uid, bytes, msg.caption), getPlants(uid)]);
+      [{ scan, photos }, plants] = await Promise.all([scanForUser(uid, bytes, msg.caption, false, true, onStage), getPlants(uid)]);
+      finished = true;
     } catch (e) {
+      finished = true;
       await reply({ text: 'Не получилось разглядеть 😕 ' + e.message });
       return;
     }

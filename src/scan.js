@@ -50,6 +50,7 @@ ${SCHEMA}`;
 // Два шага: сначала модель для фото описывает, что видит, как специалист, потом текстовая модель делает вывод.
 const LOOK_PROMPT = `${ROLE}
 На фото комнатное растение (фото может быть несколько, это одно и то же растение с разных сторон). Опиши, что видно, как в заметке специалиста. Только наблюдения, без советов. Чего не видно, так и пиши: «не видно».
+Пиши сжато, тезисами, без вводных фраз и повторов: только признаки, которые есть на фото. Вся заметка до 180 слов.
 
 1. Определение.
    - Диагностические признаки: форма листовой пластинки и основания, жилкование, рисунок и цвет пестроты, черешок (длина, влагалище, крылатость), стебель и узлы, воздушные корни, тип роста (розетка, куст, лиана).
@@ -62,7 +63,8 @@ const LOOK_PROMPT = `${ROLE}
 3. Грунт и горшок.
    - Грунт: сухой или влажный по цвету, корка, белый или зелёный налёт, плесень, тип субстрата (торф, кора, перлит).
    - Горшок: материал, примерный диаметр относительно кроны и стеблей, видны ли корни сверху или в дренаже.
-4. Условия, если видно: свет (прямое солнце, рассеянный, тень), близость к окну или батарее.`;
+4. Условия, если видно: свет (прямое солнце, рассеянный, тень), близость к окну или батарее.
+Пропускай пункты, о которых на фото ничего не сказать.`;
 
 const ADVISE_PROMPT = (seen, extra) => `${ROLE}
 Вот заметка коллеги, который смотрел на фото растения:
@@ -107,7 +109,15 @@ function partsText(c) {
 }
 
 // Запрос к модели. Возвращает основной ответ и «размышления»: модели с размышлениями иногда кладут ответ туда.
-async function chat(model, content, { maxTokens, json = false } = {}) {
+// В OpenRouter просим самого быстрого провайдера модели и, если задано, меньше «размышлений» (reasoning).
+const openRouter = () => config.llmBaseUrl.includes('openrouter.ai');
+function reasoningParam(effort) {
+  if (!effort || !openRouter()) return {};
+  return { reasoning: effort === 'off' ? { enabled: false } : { effort } };
+}
+
+async function chat(model, content, { maxTokens, json = false, effort = '' } = {}) {
+  const t0 = Date.now();
   const res = await fetch(config.llmBaseUrl + '/chat/completions', {
     method: 'POST',
     headers: {
@@ -119,9 +129,16 @@ async function chat(model, content, { maxTokens, json = false } = {}) {
       model, max_tokens: maxTokens, temperature: 0.2,
       messages: [{ role: 'user', content }],
       ...(json ? { response_format: { type: 'json_object' } } : {}),
+      ...(openRouter() ? { provider: { sort: 'throughput' } } : {}),
+      ...reasoningParam(effort),
     }),
   });
   const data = await res.json().catch(() => ({}));
+  // Сколько модель думала и писала: по этим строчкам видно, на чём теряется время.
+  const u = data.usage || {};
+  console.log(`🧠 ${model}${data.provider ? ' через ' + data.provider : ''}: ${((Date.now() - t0) / 1000).toFixed(1)} с, ` +
+    `фото и текст на входе ${u.prompt_tokens ?? '?'} ток., ответ ${u.completion_tokens ?? '?'} ток.` +
+    (u.completion_tokens_details?.reasoning_tokens ? `, из них размышления ${u.completion_tokens_details.reasoning_tokens}` : ''));
   if (!res.ok || data.error) {
     console.error('Сканер: ошибка от', model, res.status, JSON.stringify(data.error || data).slice(0, 500));
     throw new Error('Сканер сейчас недоступен: ' + (data.error?.message || res.status));
@@ -137,7 +154,7 @@ async function chat(model, content, { maxTokens, json = false } = {}) {
 
 // Описание фото: берём ответ, а если он пустой — размышления.
 async function look(content) {
-  const r = await chat(config.llmVisionModel, content, { maxTokens: 12000 });
+  const r = await chat(config.llmVisionModel, content, { maxTokens: 12000, effort: config.llmLookEffort });
   const text = r.text || r.reasoning;
   if (!text) {
     console.error('Сканер: пустой ответ от', config.llmVisionModel, JSON.stringify(r.raw).slice(0, 1500));
@@ -149,7 +166,7 @@ async function look(content) {
 // Вывод по схеме. Если JSON не нашёлся, переспрашиваем один раз построже.
 async function verdict(model, content) {
   for (let attempt = 0; attempt < 2; attempt++) {
-    const r = await chat(model, attempt === 0 ? content : withStrict(content), { maxTokens: 12000, json: true });
+    const r = await chat(model, attempt === 0 ? content : withStrict(content), { maxTokens: 12000, json: true, effort: config.llmAdviseEffort });
     const parsed = findJSON(r.text) || findJSON(r.reasoning);
     if (parsed) return normalizeScan(parsed);
     console.error(`Сканер: нет JSON от ${model} (попытка ${attempt + 1}, ${r.finish})`, JSON.stringify(r.raw).slice(0, 1500));
@@ -172,14 +189,23 @@ function extras(references, note, count = 1) {
   return t;
 }
 
-// images — одно или несколько фото одного растения; note — подпись человека к фото.
+// images — одно или несколько фото одного растения; note — подпись человека к фото;
+// onStage(text) — по ходу скана сообщает, что сейчас происходит («похоже, это …», «пишу советы»), чтобы ждать было не вслепую.
 // Справочники и модель для фото работают одновременно, чтобы не ждать их по очереди:
 // подсказки Pl@ntNet и Perenual получает модель, которая пишет вывод.
-export async function scanPhoto(images, note = '') {
+export async function scanPhoto(images, note = '', onStage = null) {
   if (!config.llmApiKey) throw new Error('Сканер пока не подключён. Полив и напоминалки работают.');
   images = [].concat(images);
   const pics = images.map((b) => ({ type: 'image_url', image_url: { url: 'data:image/jpeg;base64,' + Buffer.from(b).toString('base64') } }));
-  const refsJob = step('справочники', lookUpReferences(images));
+  let guess = '';
+  const say = (text) => { try { onStage?.(text); } catch {} };
+  const refsJob = step('справочники', lookUpReferences(images)).then((r) => {
+    if (r.identified) {
+      guess = `Похоже, это ${r.identified.latin} (${Math.round(r.identified.score * 100)}% по Pl@ntNet). `;
+      say(guess + 'Разглядываю листья, грунт и горшок…');
+    }
+    return r;
+  });
   let scan, refs;
   if (!config.llmTextModel) {
     refs = await refsJob;
@@ -187,6 +213,7 @@ export async function scanPhoto(images, note = '') {
   } else {
     const seenJob = step('модель для фото', look([{ type: 'text', text: LOOK_PROMPT + extras('', note) }, ...pics]));
     [refs] = await Promise.all([refsJob, seenJob]);
+    say(guess + 'Пишу вывод и советы, ещё немного…');
     scan = await step('модель для вывода', verdict(config.llmTextModel, ADVISE_PROMPT(await seenJob, extras(refs.text, note, images.length))));
   }
   if (refs.identified) scan.identified = refs.identified;

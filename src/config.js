@@ -14,6 +14,10 @@ export const config = {
   llmVisionModel: process.env.LLM_VISION_MODEL || process.env.LLM_MODEL || 'deepseek/deepseek-v4-flash-vision-exp',
   // Модель, которая по описанию фото пишет вывод и советы. Пустая строка — всё делает модель для фото.
   llmTextModel: process.env.LLM_TEXT_MODEL ?? '~deepseek/deepseek-v4-flash-latest',
+  // Сколько моделям «размышлять» перед ответом (OpenRouter reasoning effort): low | medium | high | off, пусто — как у модели.
+  // Модели для фото думать почти не нужно, она только описывает, что видит: так скан заметно быстрее.
+  llmLookEffort: process.env.LLM_LOOK_REASONING ?? 'low',
+  llmAdviseEffort: process.env.LLM_ADVISE_REASONING ?? '',
   // Справочные сервисы, необязательные: без ключей сканер обходится моделями.
   // Pl@ntNet (my.plantnet.org) определяет вид по фото, бесплатно 500 запросов в день.
   plantnetApiKey: process.env.PLANTNET_API_KEY || '',
