@@ -1,13 +1,35 @@
 // Экран приложения внутри Telegram (Mini App).
 function app() {
   const tg = window.Telegram && window.Telegram.WebApp;
-  const dark = tg && tg.colorScheme === 'dark';
-  if (tg) {
-    tg.ready(); tg.expand();
-    try { tg.setHeaderColor(dark ? '#121513' : '#EEF1EC'); tg.setBackgroundColor(dark ? '#121513' : '#EEF1EC'); } catch (e) {}
-  }
-  if (dark) document.documentElement.classList.add('dark');
+  if (tg) { tg.ready(); tg.expand(); }
   const initData = (tg && tg.initData) || '';
+
+  // Тема: пока человек сам не выбрал, как в Telegram. Выбор хранится на телефоне и в облаке Telegram (на всех устройствах).
+  const cloud = tg && tg.CloudStorage && tg.isVersionAtLeast && tg.isVersionAtLeast('6.9') ? tg.CloudStorage : null;
+  let theme = null; // 'light' | 'dark' | null
+  try { theme = localStorage.getItem('theme'); } catch (e) {}
+  const isDark = () => (theme ? theme === 'dark' : !!(tg && tg.colorScheme === 'dark'));
+  function applyTheme() {
+    const dark = isDark();
+    document.documentElement.classList.toggle('dark', dark);
+    const c = dark ? '#121513' : '#EEF1EC';
+    if (tg) try { tg.setHeaderColor(c); tg.setBackgroundColor(c); } catch (e) {}
+  }
+  function setTheme(t) {
+    theme = t;
+    try { localStorage.setItem('theme', t); } catch (e) {}
+    if (cloud) try { cloud.setItem('theme', t); } catch (e) {}
+    applyTheme();
+  }
+  applyTheme();
+  if (tg) tg.onEvent('themeChanged', () => { if (!theme) { applyTheme(); render(); } });
+  if (cloud) {
+    try {
+      cloud.getItem('theme', (err, v) => {
+        if (!err && (v === 'light' || v === 'dark') && v !== theme) { theme = v; try { localStorage.setItem('theme', v); } catch (e) {} applyTheme(); render(); }
+      });
+    } catch (e) {}
+  }
 
   const root = document.getElementById('root');
   const MONTHS = ['января', 'февраля', 'марта', 'апреля', 'мая', 'июня', 'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря'];
@@ -320,7 +342,9 @@ function app() {
     else if (route === 'share') view = viewShare();
     else view = viewToday();
     patch(root, '<nav class="tabs">' + TABS.filter((t) => own() || t[0] !== 'scan').map((t) => '<button data-go="' + t[0] + '" class="' + (t[0] === tab ? 'on' : '') + '">' +
-      (t[0] === 'scan' ? ms('photo_camera') : '') + t[1] + '</button>').join('') + '</nav><main>' + view + '</main>');
+      (t[0] === 'scan' ? ms('photo_camera') : '') + t[1] + '</button>').join('') +
+      '<button class="theme-btn" data-action="theme" aria-label="' + (isDark() ? 'Светлая тема' : 'Тёмная тема') + '">' + ms(isDark() ? 'light_mode' : 'dark_mode') + '</button>' +
+      '</nav><main>' + view + '</main>');
   }
 
   // Экран не перерисовывается целиком: новая разметка сравнивается с той, что уже на экране,
@@ -557,6 +581,7 @@ function app() {
     if (d.action === 'shoot') return shoot(scan && scan.target);
     if (d.action === 'shoot-more') return shoot(scan && scan.target, true);
     if (d.action === 'scan-reset') { scan = null; scanSeq++; return go('scan'); }
+    if (d.action === 'theme') { haptic(); setTheme(isDark() ? 'light' : 'dark'); return render(); }
     if (d.action === 'water-all') { haptic(); return act(() => api('/api/water-all', {}), b); }
   });
 
