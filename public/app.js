@@ -17,7 +17,10 @@ function app() {
   const POT = { ok: ['горшок норм', 'sage'], small: ['тесный горшок', 'warm'], big: ['горшок великоват', 'lime'] };
 
   let state = null;
-  let route = (location.hash || '#today').slice(1);
+  // Экран берём из адреса (#today, #plant/<id>, #g=<id>/today). Telegram может дописать к нему свои параметры
+  // (#tgWebAppData=…), например когда приложение открыто кнопкой «Открыть» в профиле бота: их отбрасываем.
+  let route = (location.hash || '').slice(1).split(/[?&]/)[0];
+  if (!/^(today|plants|scan|share|plant\/[\w-]+|g=\d+(\/.*)?)$/.test(route)) route = 'today';
   // Чьи цветы на экране: null — свои, число — того, кто ими поделился. Ссылка из бота может открыть сразу их: #g=<id>/today
   let garden = null;
   const gm = route.match(/^g=(\d+)\/?(.*)$/);
