@@ -70,6 +70,9 @@ h3 { margin:0; font-size:19px; font-weight:500; letter-spacing:-.02em; }
 .check .ms { font-size:18px; font-variation-settings:'FILL' 0, 'wght' 600, 'opsz' 20; }
 .thumb { flex:none; width:44px; height:44px; border-radius:14px; overflow:hidden; background:var(--soft); display:grid; place-items:center; color:var(--muted); }
 .thumb img, .pic img, .photo img { width:100%; height:100%; object-fit:cover; display:block; }
+/* В миниатюрах фото лежит поверх рамки целиком: так Safari не сдвигает и не обрезает его. */
+.thumb, .pic { position:relative; }
+.thumb img, .pic img { position:absolute; inset:0; }
 .row.done .thumb img { opacity:.6; }
 
 .chip { flex:none; display:inline-flex; align-items:center; gap:4px; font-size:12px; font-weight:500; padding:5px 10px; border-radius:99px; background:var(--soft); color:var(--muted); white-space:nowrap; }
@@ -90,7 +93,7 @@ h3 { margin:0; font-size:19px; font-weight:500; letter-spacing:-.02em; }
 
 .tiles { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
 .tile { position:relative; display:flex; flex-direction:column; border:0; padding:6px; border-radius:24px; background:var(--card); text-align:left; cursor:pointer; }
-.pic { display:grid; place-items:center; aspect-ratio:1; border-radius:19px; overflow:hidden; background:var(--soft); color:var(--muted); }
+.pic { display:grid; place-items:center; width:100%; aspect-ratio:3/4; border-radius:19px; overflow:hidden; background:var(--soft); color:var(--muted); }
 .pic .ms { font-size:30px; }
 .tile.add .pic { border:1.5px dashed var(--ring); background:none; }
 .tile-body { display:flex; flex-direction:column; align-items:flex-start; gap:8px; padding:10px 8px 6px; }
@@ -99,7 +102,6 @@ h3 { margin:0; font-size:19px; font-weight:500; letter-spacing:-.02em; }
 .flag { position:absolute; top:14px; right:14px; width:32px; height:32px; border-radius:50%; display:grid; place-items:center; }
 .flag.lime { background:var(--lime); color:var(--lime-text); } .flag.warm { background:var(--warm); color:var(--warm-text); }
 .flag .ms { font-size:18px; }
-.flag.dot { top:18px; right:18px; width:12px; height:12px; box-shadow:0 0 0 3px var(--card); background:var(--lime-text); }
 
 .hero-photo { position:relative; }
 .photo { display:grid; place-items:center; width:100%; aspect-ratio:4/3; border-radius:28px; overflow:hidden; background:var(--card); color:var(--muted); }

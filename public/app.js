@@ -195,7 +195,7 @@ function app() {
       const w = when(p);
       const s = p.scan ? STATUS[p.scan.status] : null;
       return '<button class="tile" data-open="' + p.id + '">' + pic(p, 'pic') +
-        (s && p.scan.status !== 'ok' ? '<span class="flag ' + s[1] + (s[2] ? '">' + ms(s[2]) : ' dot">') + '</span>' : '') +
+        (s && s[2] && p.scan.status !== 'ok' ? '<span class="flag ' + s[1] + '">' + ms(s[2]) + '</span>' : '') +
         '<span class="tile-body"><b>' + esc(p.name) + '</b>' + chip(w[0], w[1], 'water_drop') + '</span></button>';
     }).join('') +
       (own() ? '<button class="tile add" data-go="scan"><span class="pic">' + ms('add_a_photo') + '</span><span class="tile-body"><b>Добавить</b><small>через скан</small></span></button>' : '') + '</div>';
