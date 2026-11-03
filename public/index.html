@@ -55,6 +55,20 @@ h3 { margin:0; font-size:19px; font-weight:500; letter-spacing:-.02em; }
 .segs span { flex:1; background:rgba(255,255,255,.16); transition:background .3s; }
 .segs span.on { background:rgba(255,255,255,.88); }
 .inner { background:var(--card); color:var(--text); border-radius:20px; padding:4px 10px; }
+.card.water { padding:14px 16px 16px 18px; }
+.tag-row { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+.tag-row small { font-size:13px; color:rgba(255,255,255,.72); }
+.card.water .tag-row + * { margin-top:10px; }
+.tag { display:inline-flex; align-items:center; gap:4px; padding:3px 10px 3px 7px; border-radius:99px; background:rgba(255,255,255,.16); font-size:12.5px; font-weight:500; color:#fff; }
+.tag .ms { font-size:15px; }
+.card.water .big { margin:12px 0; }
+.next-water { display:flex; align-items:center; gap:14px; width:100%; border:0; padding:0; background:none; color:#fff; text-align:left; cursor:pointer; }
+.next-water .txt { flex:1; min-width:0; display:flex; flex-direction:column; gap:4px; }
+.next-water .when { font-size:40px; font-weight:400; line-height:1; letter-spacing:-.04em; }
+.next-water .when small { font-size:18px; font-weight:400; letter-spacing:-.01em; color:rgba(255,255,255,.8); margin-right:6px; }
+.next-water b { font-size:16px; font-weight:600; letter-spacing:-.01em; line-height:1.25; }
+.next-water b i { font-style:normal; font-weight:400; color:rgba(255,255,255,.75); }
+.next-water .thumb { width:60px; height:60px; border-radius:18px; background:rgba(255,255,255,.14); color:#fff; }
 
 .rows { margin:0 -4px; }
 .row { display:flex; align-items:center; gap:6px; width:100%; padding:8px 0; border:0; border-top:1px solid var(--line); background:none; text-align:left; }

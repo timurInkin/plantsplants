@@ -161,17 +161,26 @@ function app() {
       care.length ? 'и ' + care.length + ' ' + plural(care.length, 'просит', 'просят', 'просят') + ' внимания' : 'остальные в порядке',
       DAYS[d.getUTCDay()] + ', ' + dateLabel(state.today) + (own() ? '' : ' · цветы: ' + esc(gardenName())));
 
-    h += '<section class="card green"><div class="card-head"><div><h3>Полив</h3><p>' +
-      (due.length ? 'тыкай в квадратик, когда польёшь' : next ? 'дальше ' + next.name + ', ' + when(next)[0] : 'никого поливать не надо') +
-      '</p></div><span class="circle light">' + ms('water_drop') + '</span></div>';
+    // Плашка полива. Маленький ярлык «Полив», дальше крупно главное: сколько осталось или сколько полито,
+    // а потом уже какой цветок. Сама плашка не выше, чем нужно для этих строк.
+    const tag = '<span class="tag">' + ms('water_drop') + 'Полив</span>';
     if (due.length) {
       const watered = due.length - left;
-      h += '<div class="big">' + watered + '<span>/' + due.length + '</span></div><div class="segs">' +
+      h += '<section class="card green water"><div class="tag-row">' + tag + '<small>' + (left ? 'тыкай в квадратик, когда польёшь' : 'на сегодня всё') + '</small></div>' +
+        '<div class="big">' + watered + '<span>/' + due.length + '</span></div><div class="segs">' +
         due.map((p) => '<span class="' + (p.wateredToday ? 'on' : '') + '"></span>').join('') + '</div>' +
         '<div class="inner">' + due.map(waterRow).join('') + '</div>' +
-        (left > 1 ? '<button class="pill light" data-action="water-all"><span>Полила всех</span><i>' + ms('done_all') + '</i></button>' : '');
+        (left > 1 ? '<button class="pill light" data-action="water-all"><span>Полила всех</span><i>' + ms('done_all') + '</i></button>' : '') + '</section>';
+    } else if (next) {
+      const same = state.plants.filter((p) => p.dueIn === next.dueIn && !p.wateredToday);
+      const soon = next.dueIn === 1 ? '<span class="when">завтра</span>' : '<span class="when"><small>через</small>' + days(next.dueIn) + '</span>';
+      h += '<section class="card green water"><div class="tag-row">' + tag + '</div>' +
+        '<button class="next-water" data-open="' + next.id + '"><span class="txt">' + soon +
+        '<b>' + esc(next.name) + (same.length > 1 ? ' <i>и ещё ' + (same.length - 1) + '</i>' : '') + '</b></span>' +
+        pic(next, 'thumb') + '</button></section>';
+    } else {
+      h += '<section class="card green water"><div class="tag-row">' + tag + '<small>никого поливать не надо</small></div></section>';
     }
-    h += '</section>';
 
     if (care.length) {
       h += '<section class="card"><div class="card-head"><div><h3>Просят внимания</h3><p>по последнему скану</p></div></div><div class="rows">' +
