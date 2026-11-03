@@ -12,13 +12,15 @@ import { tg, downloadFile, appButton } from './telegram.js';
 
 const html = (s) => String(s ?? '').replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
 
-// Скан с учётом досланных фото. Новое фото добавляется к прошлому скану, если бот сам просил доснять
-// (в течение 30 минут) или если фото пришли подряд, пачкой (в течение 2 минут). more — явно «это дополнение».
-export async function scanForUser(uid, bytes, note = '', more = false) {
+// Скан с учётом досланных фото. more — явно «это дополнение» (кнопка «Доснять» в приложении).
+// В чате (auto) новое фото добавляется к прошлому скану и без этого: если бот сам просил доснять
+// (в течение 30 минут) или если фото пришли подряд, пачкой (в течение 2 минут).
+// В приложении для этого есть кнопка, поэтому там новое фото без «Доснять» всегда начинает новый скан.
+export async function scanForUser(uid, bytes, note = '', more = false, auto = true) {
   const prev = (await getUser(uid))?.pending_scan;
   const age = prev?.at ? Date.now() - prev.at : Infinity;
   const join = prev?.photos > 0 && prev.photos < MAX_SCAN_PHOTOS &&
-    (more || (prev.needPhotos?.length && age < 30 * 60_000) || age < 2 * 60_000);
+    (more || (auto && ((prev.needPhotos?.length && age < 30 * 60_000) || age < 2 * 60_000)));
   const images = join ? [...(await pendingImages(uid, prev.photos)), bytes] : [bytes];
   // Фото кладём в хранилище, пока сканер думает, а не после.
   const upload = uploadPending(uid, images.length - 1, bytes);
@@ -147,7 +149,7 @@ export async function handleUpdate(update) {
     // Скан идёт около минуты: сразу показываем, что работаем, потом заменяем это сообщение ответом.
     const wait = await tg('sendMessage', {
       chat_id: msg.chat.id,
-      text: '🔍 Смотрю на фото. Обычно это около минуты: определяю вид, разглядываю листья, грунт и горшок.',
+      text: '🔍 Смотрю на фото. Обычно это минуту-полторы: определяю вид, разглядываю листья, грунт и горшок.',
     });
     const waitId = wait?.result?.message_id;
     const reply = (body) => (waitId

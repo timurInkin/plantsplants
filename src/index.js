@@ -1,6 +1,7 @@
 // Точка входа: веб-сервер для Telegram и приложения плюс часы для напоминалок.
 
 import http from 'node:http';
+import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import { config, MORNING_HOUR, EVENING_HOUR } from './config.js';
 import { todayLocal, hourLocal, validDay } from './dates.js';
@@ -35,6 +36,9 @@ function send(res, status, body, type = 'application/json; charset=utf-8') {
 
 // Что можно делать в чужих цветах, которыми поделились: смотреть и отмечать полив.
 const GUEST_OK = new Set(['/api/state', '/api/water', '/api/water/last', '/api/water-all']);
+// Последний скан из приложения у каждого человека: { id, status: working | done | error, scan, photos, error }.
+const scanJobs = new Map();
+
 const fail = (message, extra = {}) => Object.assign(new Error(message), { status: 400, ...extra });
 const gone = () => fail('Доступ к этим цветам закрыли', { gone: true });
 
@@ -58,12 +62,29 @@ async function api(uid, path, req) {
     if (!(await db.gardensOf(uid)).some((x) => x.id === g)) throw gone();
   }
 
+  // Скан из приложения: принимаем фото и сразу отвечаем, а сам скан идёт в фоне.
+  // Приложение спрашивает /api/scan/status, пока не будет готово: телефон может оборвать запрос длиной в минуту.
   if (path === '/api/scan') {
     const bytes = await readBody(req, 4_000_000);
     if (!bytes.length) throw new Error('Пустое фото');
     const more = new URL(req.url, 'http://x').searchParams.get('more') === '1';
-    const { scan, photos } = await scanForUser(uid, bytes, '', more);
-    return { scan, photos };
+    const job = { id: crypto.randomBytes(6).toString('hex'), status: 'working' };
+    scanJobs.set(uid, job);
+    track('скан из приложения', () => scanForUser(uid, bytes, '', more, false)).then(
+      (r) => Object.assign(job, { status: 'done', scan: r.scan, photos: r.photos }),
+      (e) => {
+        if (!e.status) console.error('Скан из приложения не удался', e);
+        Object.assign(job, { status: 'error', error: e.message || 'Что-то сломалось' });
+      });
+    return { job: job.id };
+  }
+  if (path === '/api/scan/status') {
+    const job = scanJobs.get(uid);
+    const id = new URL(req.url, 'http://x').searchParams.get('job');
+    if (!job || job.id !== id) throw fail('Скан прервался, сфоткай ещё раз');
+    if (job.status === 'working') return { status: 'working' };
+    if (job.status === 'error') return { status: 'error', error: job.error };
+    return { status: 'done', scan: job.scan, photos: job.photos };
   }
 
   const body = JSON.parse((await readBody(req, 100_000)).toString() || '{}');
@@ -135,10 +156,12 @@ export const server = http.createServer(async (req, res) => {
     if (path.startsWith('/api/')) {
       const user = userFromInitData(req.headers['x-init-data']);
       if (!user) return send(res, 403, { error: 'нет доступа' });
-      const result = await track(path, async () => {
+      const run = async () => {
         await db.touchUser(user.id, user.id, user.first_name); // в личке с ботом id чата совпадает с id человека
         return api(user.id, path, req);
-      });
+      };
+      // Опрос «скан готов?» идёт каждые 2 секунды, его в лог не пишем.
+      const result = path === '/api/scan/status' ? await run() : await track(path, run);
       return result ? send(res, 200, result) : send(res, 404, { error: 'not found' });
     }
 

@@ -242,7 +242,7 @@ function app() {
     h += '<section class="hero-photo"><span class="photo"><img src="' + scan.preview + '" alt=""></span>' +
       (scan.status === 'loading' ? '<span class="scanning"><i></i></span>' : '') + '</section>';
     if (scan.status === 'loading') {
-      return h + headline('Смотрю…', scanMore ? 'вместе с прошлыми фото, около минуты' : 'обычно около минуты') +
+      return h + headline('Смотрю…', scanMore ? 'вместе с прошлыми фото, минуту-полторы' : 'обычно минуту-полторы') +
         '<p class="wait-line"><b id="elapsed">' + clock(scan.started) + '</b><span>определяю вид, разглядываю листья, грунт и горшок</span></p>';
     }
     if (scan.status === 'error') {
@@ -446,17 +446,43 @@ function app() {
   let scanTarget = null;
   let scanMore = false;     // досылаем фото к текущему скану
 
+  // Скан идёт минуту-полторы, а телефон может оборвать такой долгий запрос. Поэтому фото только отправляем,
+  // а потом каждые 2 секунды спрашиваем сервер, готово ли.
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  async function waitForScan(job, isCurrent) {
+    let misses = 0;
+    for (let i = 0; i < 150; i++) {
+      await sleep(2000);
+      if (!isCurrent()) return null;
+      let r;
+      try { r = await api('/api/scan/status?job=' + encodeURIComponent(job)); misses = 0; } catch (e) {
+        if (e.message && !/грузится|Load failed|fetch/i.test(e.message)) throw e;
+        if (++misses >= 5) throw e; // связь пропала надолго
+        continue;
+      }
+      if (r.status === 'done') return r;
+      if (r.status === 'error') throw new Error(r.error);
+    }
+    throw new Error('Скан слишком долго думает, попробуй ещё раз');
+  }
+
+  let scanSeq = 0;
   camera.addEventListener('change', async () => {
     const file = camera.files[0];
     camera.value = '';
     if (!file) return;
+    const seq = ++scanSeq;
+    const isCurrent = () => seq === scanSeq;
     try {
       const img = await shrink(file);
       scan = { status: 'loading', preview: img.preview, target: scanTarget, started: Date.now() };
       go('scan');
-      const res = await api('/api/scan' + (scanMore ? '?more=1' : ''), img.blob, true);
+      const { job } = await api('/api/scan' + (scanMore ? '?more=1' : ''), img.blob, true);
+      const res = await waitForScan(job, isCurrent);
+      if (!res || !isCurrent()) return;
       scan = { ...scan, status: 'done', result: res.scan, photos: res.photos || 1 };
     } catch (e) {
+      if (!isCurrent()) return;
       scan = { ...(scan || {}), status: 'error', error: e.message };
     }
     if (route === 'scan') render();
@@ -530,7 +556,7 @@ function app() {
     }
     if (d.action === 'shoot') return shoot(scan && scan.target);
     if (d.action === 'shoot-more') return shoot(scan && scan.target, true);
-    if (d.action === 'scan-reset') { scan = null; return go('scan'); }
+    if (d.action === 'scan-reset') { scan = null; scanSeq++; return go('scan'); }
     if (d.action === 'water-all') { haptic(); return act(() => api('/api/water-all', {}), b); }
   });
 
