@@ -250,6 +250,15 @@ export async function savePending(uid, target) {
   return { plant, isNew: !existing };
 }
 
+// ───── замеры скана ─────
+// Сколько шёл каждый скан и какие модели отвечали: по таблице scan_runs видно, стал ли скан быстрее.
+// Пока таблицы нет, просто ничего не пишем.
+let runsWarned = false;
+export async function logScan(row) {
+  const { error } = await supabase.from('scan_runs').insert(row);
+  if (error && !runsWarned) { runsWarned = true; console.error('Замеры скана не пишутся:', error.message); }
+}
+
 // ───── гостевой доступ ─────
 // В ссылке-приглашении лежит share_token хозяина цветов. Кто её открыл, становится гостем (таблица shares).
 // Пока в базе нет таблицы shares, гостевой доступ просто выключен, остальное работает.

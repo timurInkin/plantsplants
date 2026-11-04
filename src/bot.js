@@ -5,8 +5,9 @@ import { EVENING_NUDGE } from './config.js';
 import { todayLocal, addDays, dayLabel, dayShort, validDay } from './dates.js';
 import {
   touchUser, getUser, getPlants, getPlant, uploadPending, setPending, undoPending, pendingImages, savePending, sameKind, downloadPhoto,
-  waterAllDue, setLastWatering, buildState, acceptInvite, gardensOf, MAX_SCAN_PHOTOS,
+  waterAllDue, setLastWatering, buildState, acceptInvite, gardensOf, MAX_SCAN_PHOTOS, logScan,
 } from './db.js';
+import { currentRun } from './timing.js';
 import { scanPhoto, scanText } from './scan.js';
 import { tg, downloadFile, appButton } from './telegram.js';
 
@@ -17,7 +18,26 @@ const html = (s) => String(s ?? '').replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<
 // (в течение 30 минут) или если фото пришли подряд, пачкой (в течение 2 минут).
 // В приложении для этого есть кнопка, поэтому там новое фото без «Доснять» всегда начинает новый скан.
 export async function scanForUser(uid, bytes, note = '', more = false, auto = true, onStage = null, plantId = null) {
-  if (plantId) return detailScan(uid, plantId, bytes, note, onStage);
+  // Каждый скан записываем в scan_runs: сколько шёл, на каких шагах и какие модели отвечали.
+  const t0 = Date.now();
+  const log = (photos, error) => {
+    const { steps, calls } = currentRun();
+    logScan({
+      user_id: uid, total_ms: Date.now() - t0, photos, steps, calls, error: error ? String(error.message || error).slice(0, 300) : null,
+      model: calls.filter((c) => c.ok).map((c) => c.model).join(' + ') || null,
+    }).catch(() => {});
+  };
+  try {
+    const r = plantId ? await detailScan(uid, plantId, bytes, note, onStage) : await joinScan(uid, bytes, note, more, auto, onStage);
+    log(r.photos);
+    return r;
+  } catch (e) {
+    log(null, e);
+    throw e;
+  }
+}
+
+async function joinScan(uid, bytes, note, more, auto, onStage) {
   const prev = (await getUser(uid))?.pending_scan;
   const age = prev?.at ? Date.now() - prev.at : Infinity;
   const join = prev?.photos > 0 && prev.photos < MAX_SCAN_PHOTOS &&
@@ -195,7 +215,7 @@ export async function handleUpdate(update) {
     // Скан идёт около минуты: сразу показываем, что работаем, потом заменяем это сообщение ответом.
     const wait = await tg('sendMessage', {
       chat_id: msg.chat.id,
-      text: '🔍 Смотрю на фото. Обычно это минуту-полторы: определяю вид, разглядываю листья, грунт и горшок.',
+      text: '🔍 Смотрю на фото. Обычно это меньше минуты: определяю вид, разглядываю листья, грунт и горшок.',
     });
     const waitId = wait?.result?.message_id;
     const reply = (body) => (waitId

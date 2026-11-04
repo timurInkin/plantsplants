@@ -3,7 +3,7 @@
 import { config } from './config.js';
 import { todayLocal } from './dates.js';
 import { lookUpReferences } from './references.js';
-import { step } from './timing.js';
+import { step, noteCall } from './timing.js';
 
 // Роль для обеих моделей: специалист, который смотрит на растение как ботаник и фитопатолог,
 // но отвечает коротко и по делу, без лекций.
@@ -144,6 +144,8 @@ async function chat(model, content, { maxTokens, json = false, effort = '' } = {
   const data = await res.json().catch(() => ({}));
   // Сколько модель думала и писала: по этим строчкам видно, на чём теряется время.
   const u = data.usage || {};
+  noteCall({ model, provider: data.provider || '', s: Math.round((Date.now() - t0) / 100) / 10, in: u.prompt_tokens ?? null, out: u.completion_tokens ?? null,
+    thinking: u.completion_tokens_details?.reasoning_tokens ?? null, ok: res.ok && !data.error });
   console.log(`🧠 ${model}${data.provider ? ' через ' + data.provider : ''}: ${((Date.now() - t0) / 1000).toFixed(1)} с, ` +
     `фото и текст на входе ${u.prompt_tokens ?? '?'} ток., ответ ${u.completion_tokens ?? '?'} ток.` +
     (u.completion_tokens_details?.reasoning_tokens ? `, из них размышления ${u.completion_tokens_details.reasoning_tokens}` : ''));
@@ -172,9 +174,9 @@ async function look(content) {
 }
 
 // Вывод по схеме. Если JSON не нашёлся, переспрашиваем один раз построже.
-async function verdict(model, content) {
+async function verdict(model, content, effort = config.llmAdviseEffort) {
   for (let attempt = 0; attempt < 2; attempt++) {
-    const r = await chat(model, attempt === 0 ? content : withStrict(content), { maxTokens: 12000, json: true, effort: config.llmAdviseEffort });
+    const r = await chat(model, attempt === 0 ? content : withStrict(content), { maxTokens: 12000, json: true, effort });
     const parsed = findJSON(r.text) || findJSON(r.reasoning);
     if (parsed) return normalizeScan(parsed);
     console.error(`Сканер: нет JSON от ${model} (попытка ${attempt + 1}, ${r.finish})`, JSON.stringify(r.raw).slice(0, 1500));
@@ -228,7 +230,21 @@ export async function scanPhoto(images, note = '', onStage = null, prior = null,
     return r;
   });
   let scan, refs;
-  if (!config.llmTextModel) {
+  // Быстрый путь: одна модель сразу пишет вывод. Ждём только справочники (Pl@ntNet), и не дольше 8 секунд.
+  if (config.llmFastModel) {
+    try {
+      refs = await Promise.race([refsJob, new Promise((r) => setTimeout(() => r({ text: '' }), 8000))]);
+      say(guess + 'Пишу вывод и советы, ещё немного…');
+      scan = await step('быстрая модель', verdict(config.llmFastModel,
+        [{ type: 'text', text: SCAN_PROMPT + extras(refs.text, note, images.length, prior, false, detail) }, ...pics], config.llmFastEffort));
+    } catch (e) {
+      console.error('Быстрая модель не ответила, сканирую обычным путём:', e.message);
+      scan = null;
+    }
+  }
+  if (scan) {
+    // Быстрая модель справилась.
+  } else if (!config.llmTextModel) {
     refs = await refsJob;
     scan = await step('модель', verdict(config.llmVisionModel, [{ type: 'text', text: SCAN_PROMPT + extras(refs.text, note, images.length, prior, false, detail) }, ...pics]));
   } else {

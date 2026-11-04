@@ -18,6 +18,10 @@ export const config = {
   // Модели для фото думать почти не нужно, она только описывает, что видит: так скан заметно быстрее.
   llmLookEffort: process.env.LLM_LOOK_REASONING ?? 'low',
   llmAdviseEffort: process.env.LLM_ADVISE_REASONING ?? '',
+  // Быстрый скан: одна модель сразу смотрит на фото и пишет вывод, за 10–20 секунд вместо минуты-двух.
+  // Если она не ответила, скан идёт старым путём, двумя моделями выше. Пустая строка — быстрый скан выключен.
+  llmFastModel: process.env.LLM_FAST_MODEL ?? 'google/gemini-3.6-flash',
+  llmFastEffort: process.env.LLM_FAST_REASONING ?? 'low',
   // Справочные сервисы, необязательные: без ключей сканер обходится моделями.
   // Pl@ntNet (my.plantnet.org) определяет вид по фото, бесплатно 500 запросов в день.
   plantnetApiKey: process.env.PLANTNET_API_KEY || '',

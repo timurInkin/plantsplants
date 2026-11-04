@@ -48,3 +48,18 @@ alter table shares enable row level security;
 -- Публичная корзина для фото цветов.
 insert into storage.buckets (id, name, public) values ('photos', 'photos', true)
 on conflict (id) do nothing;
+
+-- Замеры скана: сколько шёл каждый скан, на каких шагах и какие модели отвечали.
+create table if not exists scan_runs (
+  id bigserial primary key,
+  user_id bigint,
+  created_at timestamptz not null default now(),
+  total_ms integer,
+  photos integer,
+  model text,
+  steps jsonb,
+  calls jsonb,
+  error text
+);
+create index if not exists scan_runs_created_at on scan_runs (created_at desc);
+alter table scan_runs enable row level security;

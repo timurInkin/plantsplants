@@ -320,7 +320,7 @@ function app() {
         (scan.status === 'loading' ? '<span class="scanning"><i></i></span>' : '') + '</section>';
     }
     if (scan.status === 'loading') {
-      return h + headline('Смотрю…', scan.detail ? 'деталь вместе с фото цветка, минуту-полторы' : scanMore ? 'вместе с прошлыми фото, минуту-полторы' : 'обычно минуту-полторы') +
+      return h + headline('Смотрю…', scan.detail ? 'деталь вместе с фото цветка, обычно меньше минуты' : scanMore ? 'вместе с прошлыми фото, обычно меньше минуты' : 'обычно меньше минуты') +
         '<p class="wait-line"><b id="elapsed">' + clock(scan.started) + '</b><span>' + esc(scan.stage || 'Определяю вид, разглядываю листья, грунт и горшок…') + '</span></p>';
     }
     if (scan.status === 'error') {

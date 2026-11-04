@@ -8,7 +8,7 @@ const now = () => performance.now();
 const sec = (ms) => (ms / 1000).toFixed(1) + ' с';
 
 export function track(label, fn) {
-  const t = { t0: now(), db: 0, dbCount: 0, dbMax: 0, steps: [] };
+  const t = { t0: now(), db: 0, dbCount: 0, dbMax: 0, steps: [], calls: [] };
   return store.run(t, async () => {
     try {
       return await fn();
@@ -29,6 +29,16 @@ export async function step(name, promise) {
   } finally {
     store.getStore()?.steps.push([name, now() - t0]);
   }
+}
+
+// Что уже набралось в текущем запросе: шаги и вызовы моделей. Скан записывает это в базу (таблица scan_runs).
+export function currentRun() {
+  const t = store.getStore();
+  if (!t) return { steps: [], calls: [], db: 0 };
+  return { steps: t.steps.map(([name, ms]) => [name, Math.round(ms)]), calls: t.calls, db: Math.round(t.db) };
+}
+export function noteCall(call) {
+  store.getStore()?.calls.push(call);
 }
 
 // fetch для Supabase: засекает каждый запрос к базе и хранилищу фото.
