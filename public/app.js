@@ -274,7 +274,7 @@ function app() {
   function viewDone() {
     if (!done) return viewToday();
     const p = done.plant && byId(done.plant);
-    let h = '<section class="done"><span class="done-pic' + (done.photo ? '' : ' empty') + '">' +
+    let h = '<section class="done-screen"><span class="done-pic' + (done.photo ? '' : ' empty') + '">' +
       (done.photo ? '<img src="' + esc(done.photo) + '" alt="">' : ms(done.icon || 'potted_plant')) +
       '<span class="done-badge">' + ms('check') + '</span></span>' +
       '<h1>' + esc(done.title) + (done.sub ? '<br><span>' + esc(done.sub) + '</span>' : '') + '</h1>' +
