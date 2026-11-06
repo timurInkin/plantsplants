@@ -225,6 +225,7 @@ export async function savePending(uid, target) {
   const [user, existing] = await Promise.all([getUser(uid), target === 'new' ? null : getPlant(uid, target)]);
   const { photos: _count, at: _at, prev: _prev, detail: _detail, ...scan } = user?.pending_scan || {};
   if (!scan.name) throw fail('Скан потерялся, сфоткай ещё раз');
+  if (scan.notPlant) throw fail('На фото нет растения, сохранять нечего');
   if (target !== 'new' && !existing) throw notFound();
 
   const id = existing ? existing.id : newPlantId();

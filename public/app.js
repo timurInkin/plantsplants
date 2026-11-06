@@ -32,6 +32,11 @@ function app() {
   }
 
   const root = document.getElementById('root');
+  // Значки — это шрифт: пока он не загрузился, вместо значка было бы слово («photo_camera»). Такие слова прячем.
+  const iconsReady = () => document.documentElement.classList.add('icons');
+  try {
+    document.fonts.load('20px "Material Symbols Rounded"', 'eco').then((f) => { if (f.length) iconsReady(); }, () => {});
+  } catch (e) { iconsReady(); }
   const MONTHS = ['января', 'февраля', 'марта', 'апреля', 'мая', 'июня', 'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря'];
   const DAYS = ['Воскресенье', 'Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница', 'Суббота'];
   const TABS = [['today', 'Сегодня'], ['plants', 'Цветы'], ['scan', 'Скан']];
@@ -384,6 +389,11 @@ function app() {
       return h + headline('Не получилось', scan.error) + '<button class="pill" data-action="shoot"><span>Сфоткать ещё раз</span><i>' + ms('photo_camera') + '</i></button>';
     }
     const s = scan.result;
+    // На фото не растение: сохранять нечего, просто предлагаем сфоткать цветок.
+    if (s.notPlant) {
+      return h + headline(s.statusText || 'Тут не видно растения', 'сфоткай цветок целиком, вместе с горшком') +
+        '<button class="pill" data-action="shoot"><span>Сфоткать цветок</span><i>' + ms('photo_camera') + '</i></button>';
+    }
     if (slide > 0) {
       h += headline(s.name, s.latin) + detailCard((s.details || [])[slide - 1], slide, shots.length, 'data-action="drop-shot" data-i="' + slide + '"');
     } else {

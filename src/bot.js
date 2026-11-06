@@ -72,7 +72,7 @@ async function logged(uid, run) {
 async function joinScan(uid, bytes, note, more, auto, onStage) {
   const prev = (await getUser(uid))?.pending_scan;
   const age = prev?.at ? Date.now() - prev.at : Infinity;
-  const join = prev?.photos > 0 && prev.photos < MAX_SCAN_PHOTOS &&
+  const join = prev?.photos > 0 && prev.photos < MAX_SCAN_PHOTOS && !prev.notPlant &&
     (more || (auto && ((prev.needPhotos?.length && age < 30 * 60_000) || age < 2 * 60_000)));
   const images = join ? [...(await pendingImages(uid, prev.photos)), bytes] : [bytes];
   const detail = !!(join && prev.detail);
@@ -144,6 +144,9 @@ function nextWateringText(day, every) {
 
 // Ответ на скан с кнопками «куда сохранить». Цветы, на которые скан не похож, сохраняются только после вопроса «точно он?» (кнопка sc?:).
 function scanMessage(scan, photos, plants) {
+  if (scan.notPlant) {
+    return { parse_mode: 'HTML', text: `🔍 ${html(scan.statusText || 'Тут не видно растения.')}\n\nПришли фото цветка целиком, вместе с горшком.` };
+  }
   const rows = [[{ text: '＋ Это новый цветок', callback_data: 'sc:new' }]];
   for (let i = 0; i < plants.length; i += 2) {
     rows.push(plants.slice(i, i + 2).map((p) => ({

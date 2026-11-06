@@ -84,6 +84,10 @@ amvera.yml      настройки для хостинга Amvera (если за
 
 В `src/config.js`: часовой пояс (`TZ_OFFSET_HOURS = 3`), час утренней и вечерней напоминалки, можно выключить вечернюю (`EVENING_NUDGE = false`).
 
+## Шрифты и значки
+
+Шрифты лежат в `public/fonts/` и отдаются нашим сервером: у части людей Google Fonts не грузится, и вместо значков в приложении видны слова. `icons.woff2` — Material Symbols Rounded, только значки, которые есть в `public/app.js`. Если добавляешь новый значок, пересобери файл: открой в браузере `https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@20..48,300..500,0..1,0&icon_names=<все значки через запятую, по алфавиту>&display=block`, скачай woff2 по ссылке из `src:` в `public/fonts/icons.woff2` и подними `?v=` у этого файла в `public/index.html`.
+
 ## Проверка у себя
 
 ```

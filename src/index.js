@@ -174,6 +174,13 @@ function updateLabel(u) {
 export const server = http.createServer(async (req, res) => {
   const path = new URL(req.url, 'http://x').pathname;
   try {
+    // Шрифты: имена файлов не меняются, поэтому телефон хранит их долго (новая версия — новый ?v= в index.html).
+    if (req.method === 'GET' && /^\/fonts\/[\w-]+\.woff2$/.test(path)) {
+      const font = await fs.readFile(new URL('../public' + path, import.meta.url)).catch(() => null);
+      if (!font) return send(res, 404, 'not found', 'text/plain');
+      res.writeHead(200, { 'Content-Type': 'font/woff2', 'Cache-Control': 'public, max-age=31536000, immutable' });
+      return res.end(font);
+    }
     if (req.method === 'GET' && STATIC[path]) {
       const [file, type] = STATIC[path];
       return send(res, 200, await fs.readFile(new URL('../public/' + file, import.meta.url)), type);
