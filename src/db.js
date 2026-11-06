@@ -109,6 +109,11 @@ export function sameKind(plant, scan) {
 export async function toggleWater(plantId, day) {
   const removed = check(await supabase.from('waterings').delete().eq('plant_id', plantId).eq('day', day).select());
   if (!removed.length) check(await supabase.from('waterings').insert({ plant_id: plantId, day }));
+  return !removed.length;
+}
+export async function setWatered(plantId, day, on) {
+  if (on) check(await supabase.from('waterings').upsert({ plant_id: plantId, day }));
+  else check(await supabase.from('waterings').delete().eq('plant_id', plantId).eq('day', day));
 }
 
 // «Последний раз поливали тогда-то»: от этого дня считаем следующий полив, более поздние отметки убираем.
@@ -117,24 +122,115 @@ export async function setLastWatering(plantId, day) {
   check(await supabase.from('waterings').upsert({ plant_id: plantId, day }));
 }
 
-export async function waterAllDue(uid, day) {
-  const due = (await buildState(uid)).plants.filter((p) => p.dueIn <= 0 && !p.wateredToday);
+// mode: 'plain' — только обычный полив, 'feed' — только те, кого сегодня поливать с удобрением (им отмечаем и подкормку), 'all' — все.
+export async function waterAllDue(uid, day, mode = 'all') {
+  const state = await buildState(uid);
+  const feedNow = (p) => !!p.feed?.due;
+  const due = mode === 'feed'
+    ? state.plants.filter((p) => (p.dueIn <= 0 || p.wateredToday) && feedNow(p))
+    : state.plants.filter((p) => p.dueIn <= 0 && !p.wateredToday && (mode === 'all' || !feedNow(p)));
   if (due.length) check(await supabase.from('waterings').upsert(due.map((p) => ({ plant_id: p.id, day }))));
+  const fed = mode === 'plain' ? [] : due.filter(feedNow);
+  await Promise.all(fed.map((p) => markFed(uid, p.id, p.feed, day, true)));
   return due.length;
+}
+
+// ───── удобрения и подкормка ─────
+// У цветка в plants.feed: { fert: id удобрения, every: раз во сколько дней (0 — пауза), dose, why, last: день последней подкормки, prev }.
+// Подкормка идёт вместе с поливом: цветок попадает в «Полив с удобрением», когда пора поливать и с прошлой подкормки прошло every дней.
+
+const newFertId = () => 'f' + Date.now().toString(36) + crypto.randomBytes(2).toString('hex');
+// Пока в базе нет таблицы удобрений, остальное работает как раньше.
+const noFerts = (error) => error && /fertilizers|feed/.test(error.message || '');
+
+export async function getFertilizers(uid) {
+  const { data, error } = await supabase.from('fertilizers').select('*').eq('user_id', uid).order('created_at');
+  if (noFerts(error)) return [];
+  return check({ data, error });
+}
+export async function getFertilizer(uid, id) {
+  if (!id) return null;
+  return check(await supabase.from('fertilizers').select('*').eq('user_id', uid).eq('id', id).maybeSingle());
+}
+
+export async function saveFertilizer(uid, fert, bytes) {
+  const id = newFertId();
+  const path = `${uid}/${id}-${Date.now().toString(36)}.jpg`;
+  const { error } = await photos().upload(path, bytes, { contentType: 'image/jpeg', upsert: true });
+  const { name, ...info } = fert;
+  return check(await supabase.from('fertilizers')
+    .insert({ id, user_id: uid, name, info: { ...info, applied: false }, photo_path: error ? null : path }).select().single());
+}
+
+// Поставить в график: каждому цветку из плана — это удобрение, как часто и сколько. Прошлую подкормку помним.
+export async function applyFertilizer(uid, fert) {
+  const plants = await getPlants(uid);
+  const plan = new Map((fert.info.plan || []).map((x) => [x.plant, x]));
+  const changes = plants.filter((p) => plan.has(p.id) || p.feed?.fert === fert.id).map((p) => {
+    const x = plan.get(p.id);
+    // Пауза для цветка, у которого уже есть другое удобрение, его не сбивает.
+    if (x && x.every === 0 && p.feed?.fert && p.feed.fert !== fert.id) return null;
+    const feed = x ? { fert: fert.id, every: x.every, dose: x.dose || fert.info.dose || '', why: x.why || '', last: p.feed?.last || null } : null;
+    return updatePlant(uid, p.id, { feed });
+  }).filter(Boolean);
+  await Promise.all([...changes, supabase.from('fertilizers').update({ info: { ...fert.info, applied: true } }).eq('id', fert.id).then(check)]);
+  return changes.length;
+}
+
+export async function deleteFertilizer(uid, fert) {
+  const plants = (await getPlants(uid)).filter((p) => p.feed?.fert === fert.id);
+  check(await supabase.from('fertilizers').delete().eq('user_id', uid).eq('id', fert.id));
+  await Promise.all([
+    ...plants.map((p) => updatePlant(uid, p.id, { feed: null })),
+    fert.photo_path ? photos().remove([fert.photo_path]) : null,
+  ]);
+}
+
+export async function setFeedEvery(uid, plant, every) {
+  if (!plant.feed) throw fail('У этого цветка нет удобрения в графике');
+  await updatePlant(uid, plant.id, { feed: { ...plant.feed, every } });
+}
+
+// Отметка «подкормила сегодня» и её отмена: прошлый день подкормки возвращается.
+export async function markFed(uid, plantId, feed, day, on) {
+  if (!feed) return;
+  const next = on
+    ? { ...feed, prev: feed.last === day ? feed.prev ?? null : feed.last ?? null, last: day }
+    : { ...feed, last: feed.last === day ? feed.prev ?? null : feed.last, prev: null };
+  const { fedToday: _f, due: _d, name: _n, nextIn: _x, ...clean } = next;
+  check(await supabase.from('plants').update({ feed: clean }).eq('id', plantId));
 }
 
 // Всё, что нужно экрану приложения. Один запрос: цветы вместе с последним поливом каждого.
 export async function buildState(uid) {
   const today = todayLocal();
-  const plants = check(await supabase.from('plants').select('*, waterings(day)').eq('user_id', uid)
-    .order('created_at').order('id')
-    .order('day', { referencedTable: 'waterings', ascending: false })
-    .limit(1, { referencedTable: 'waterings' }));
+  const [plants, ferts] = await Promise.all([
+    supabase.from('plants').select('*, waterings(day)').eq('user_id', uid)
+      .order('created_at').order('id')
+      .order('day', { referencedTable: 'waterings', ascending: false })
+      .limit(1, { referencedTable: 'waterings' }).then(check),
+    getFertilizers(uid),
+  ]);
+  const fertName = Object.fromEntries(ferts.map((f) => [f.id, f.name]));
   return {
     today,
+    fertilizers: ferts.map((f) => ({
+      id: f.id, name: f.name, ...f.info, photo: f.photo_path ? photoUrl(f.photo_path) : null,
+      count: plants.filter((p) => p.feed?.fert === f.id && p.feed.every > 0).length,
+    })),
     plants: plants.map((p) => {
       const lastDay = p.waterings?.[0]?.day || null;
+      // Подкормка: пора ли (по интервалу), была ли сегодня, через сколько дней следующая.
+      const f = p.feed && fertName[p.feed.fert] ? p.feed : null;
+      const since = f?.last ? daysBetween(f.last, today) : null;
+      const feed = f && {
+        fert: f.fert, name: fertName[f.fert], every: f.every, dose: f.dose || '', why: f.why || '', last: f.last || null,
+        fedToday: f.last === today,
+        due: f.every > 0 && f.last !== today && (since === null || since >= f.every),
+        nextIn: f.every > 0 ? (since === null ? 0 : Math.max(0, f.every - since)) : null,
+      };
       return {
+        feed,
         id: p.id, name: p.name, every: p.every,
         scan: p.scan && { ...p.scan, details: (p.scan.details || []).filter((d) => d.path).map((d) => ({ ...d, photo: photoUrl(d.path) })) },
         last: lastDay,

@@ -5,8 +5,10 @@ import { EVENING_NUDGE } from './config.js';
 import { todayLocal, addDays, dayLabel, dayShort, validDay } from './dates.js';
 import {
   touchUser, getUser, getPlants, getPlant, uploadPending, setPending, undoPending, pendingImages, savePending, sameKind, downloadPhoto,
-  waterAllDue, setLastWatering, buildState, acceptInvite, gardensOf, MAX_SCAN_PHOTOS, logScan,
+  waterAllDue, setLastWatering, buildState, acceptInvite, gardensOf, MAX_SCAN_PHOTOS, logScan, updateUser,
+  getFertilizers, saveFertilizer,
 } from './db.js';
+import { scanFertilizer } from './fert.js';
 import { currentRun } from './timing.js';
 import { scanPhoto, scanText } from './scan.js';
 import { tg, downloadFile, appButton } from './telegram.js';
@@ -46,6 +48,25 @@ export async function recheckForUser(uid, { plant: plantId, name, latin }, onSta
     const scan = await scanPhoto(images, '', onStage, identity, detail);
     const at = await setPending(uid, { ...scan, ...(detail ? { detail } : {}) }, images.length, prior);
     return { scan, photos: images.length, at };
+  });
+}
+
+// Скан удобрения: по новому фото или по фото последнего скана (сканер цветов сказал, что на нём удобрение).
+// Удобрение сразу сохраняется со своим графиком, а «Поставить в график» в приложении раздаёт его цветам.
+export async function fertForUser(uid, bytes = null, onStage = null) {
+  return logged(uid, async () => {
+    const fromPending = !bytes;
+    if (fromPending) {
+      const p = (await getUser(uid))?.pending_scan;
+      if (!p?.photos) throw Object.assign(new Error('Фото потерялось, сфоткай упаковку ещё раз'), { status: 400 });
+      bytes = (await pendingImages(uid, p.photos)).at(-1);
+    }
+    try { onStage?.('Читаю упаковку и составляю график под твои цветы…'); } catch {}
+    const [plants, ferts] = await Promise.all([getPlants(uid), getFertilizers(uid)]);
+    const fert = await scanFertilizer(bytes, plants, Object.fromEntries(ferts.map((f) => [f.id, f.name])), todayLocal() + 'T12:00:00Z');
+    const row = await saveFertilizer(uid, fert, bytes);
+    if (fromPending) await updateUser(uid, { pending_scan: null });
+    return { fert: row, photos: 1 };
   });
 }
 
@@ -144,6 +165,12 @@ function nextWateringText(day, every) {
 
 // Ответ на скан с кнопками «куда сохранить». Цветы, на которые скан не похож, сохраняются только после вопроса «точно он?» (кнопка sc?:).
 function scanMessage(scan, photos, plants) {
+  if (scan.notPlant && scan.fertilizer) {
+    return {
+      parse_mode: 'HTML', text: `🧪 ${html(scan.statusText || 'Это удобрение.')}\n\nРазберу его и составлю график подкормки для твоих цветов.`,
+      reply_markup: { inline_keyboard: [[appButton('Разобрать удобрение', 'fert/pending')]] },
+    };
+  }
   if (scan.notPlant) {
     return { parse_mode: 'HTML', text: `🔍 ${html(scan.statusText || 'Тут не видно растения.')}\n\nПришли фото цветка целиком, вместе с горшком.` };
   }
@@ -319,8 +346,12 @@ export async function remind(user, evening, owners = []) {
     const state = await buildState(g.id);
     const due = state.plants.filter((p) => p.dueIn <= 0 && !p.wateredToday);
     if (!due.length) continue;
+    const plain = due.filter((p) => !p.feed?.due), fed = due.filter((p) => p.feed?.due);
     const text = (g.name ? `🪴 <b>Цветы: ${html(g.name)}</b>\n` : '') +
-      (evening ? '🌙 <b>Ещё не политы:</b>\n' : '💧 <b>Сегодня пить хотят:</b>\n') + due.map((p) => '• ' + html(p.name)).join('\n');
+      (plain.length ? (evening ? '🌙 <b>Ещё не политы:</b>\n' : '💧 <b>Сегодня пить хотят:</b>\n') + plain.map((p) => '• ' + html(p.name)).join('\n') : '') +
+      (plain.length && fed.length ? '\n\n' : '') +
+      (fed.length ? (evening ? '🌙 <b>Ещё не политы с удобрением:</b>\n' : '🧪 <b>Полить с удобрением:</b>\n') +
+        fed.map((p) => `• ${html(p.name)}: «${html(p.feed.name)}»${p.feed.dose ? ', ' + html(p.feed.dose) : ''}`).join('\n') : '');
     await tg('sendMessage', {
       chat_id: user.chat_id, text, parse_mode: 'HTML',
       reply_markup: { inline_keyboard: [[

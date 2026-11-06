@@ -8,7 +8,7 @@ import { todayLocal, hourLocal, validDay } from './dates.js';
 import * as db from './db.js';
 import { setupTelegram, webhookSecret, userFromInitData, botUsername } from './telegram.js';
 import { track } from './timing.js';
-import { handleUpdate, remind, scanForUser, recheckForUser, notify } from './bot.js';
+import { handleUpdate, remind, scanForUser, recheckForUser, fertForUser, notify } from './bot.js';
 
 const STATIC = {
   '/': ['index.html', 'text/html; charset=utf-8'],
@@ -40,11 +40,12 @@ const GUEST_OK = new Set(['/api/state', '/api/water', '/api/water/last', '/api/w
 const scanJobs = new Map();
 
 // Скан идёт в фоне, а приложение спрашивает /api/scan/status, пока не будет готово.
-function startScanJob(uid, label, run) {
+// shape — что отдать приложению, когда готово: по умолчанию скан цветка с его фото.
+function startScanJob(uid, label, run, shape = (r) => ({ scan: r.scan, photos: r.photos, shots: db.pendingShots(uid, r.photos, r.at) })) {
   const job = { id: crypto.randomBytes(6).toString('hex'), status: 'working' };
   scanJobs.set(uid, job);
   track(label, () => run((text) => { job.stage = text; })).then(
-    (r) => Object.assign(job, { status: 'done', scan: r.scan, photos: r.photos, shots: db.pendingShots(uid, r.photos, r.at) }),
+    (r) => Object.assign(job, { status: 'done', result: shape(r) }),
     (e) => {
       if (!e.status) console.error(label + ' не удался', e);
       Object.assign(job, { status: 'error', error: e.message || 'Что-то сломалось' });
@@ -87,6 +88,13 @@ async function api(uid, path, req) {
     const more = q.get('more') === '1', plant = q.get('plant') || null;
     return startScanJob(uid, 'скан из приложения', (onStage) => scanForUser(uid, bytes, '', more, false, onStage, plant));
   }
+  // Скан удобрения: новое фото или фото последнего скана (?from=pending), если сканер цветов увидел на нём удобрение.
+  if (path === '/api/fert/scan') {
+    const fromPending = new URL(req.url, 'http://x').searchParams.get('from') === 'pending';
+    const bytes = fromPending ? null : await readBody(req, 4_000_000);
+    if (!fromPending && !bytes.length) throw new Error('Пустое фото');
+    return startScanJob(uid, 'скан удобрения', (onStage) => fertForUser(uid, bytes, onStage), (r) => ({ fert: { id: r.fert.id } }));
+  }
   if (path === '/api/scan/undo') {
     const r = await db.undoPending(uid);
     return { ...r, shots: db.pendingShots(uid, r.photos, r.at) };
@@ -97,7 +105,7 @@ async function api(uid, path, req) {
     if (!job || job.id !== id) throw fail('Скан прервался, сфоткай ещё раз');
     if (job.status === 'working') return { status: 'working', stage: job.stage || '' };
     if (job.status === 'error') return { status: 'error', error: job.error };
-    return { status: 'done', scan: job.scan, photos: job.photos, shots: job.shots };
+    return { status: 'done', ...job.result };
   }
 
   const body = JSON.parse((await readBody(req, 100_000)).toString() || '{}');
@@ -119,8 +127,24 @@ async function api(uid, path, req) {
     return { ...(await db.buildState(uid)), saved: plant.id, isNew };
   }
   if (path === '/api/water-all') {
-    await db.waterAllDue(g, today);
+    await db.waterAllDue(g, today, ['plain', 'feed'].includes(body.mode) ? body.mode : 'all');
     return db.buildState(g);
+  }
+
+  // Удобрение: поставить в график (раздать цветам по плану) или удалить.
+  if (path === '/api/fert/apply' || path === '/api/fert/delete') {
+    const fert = await db.getFertilizer(uid, body.fert);
+    if (!fert) throw fail('Нет такого удобрения');
+    if (path === '/api/fert/delete') {
+      await db.deleteFertilizer(uid, fert);
+    } else {
+      await db.applyFertilizer(uid, fert);
+      const n = (fert.info.plan || []).filter((x) => x.every > 0).length;
+      notify(uid, n
+        ? `🧪 Поставила «${esc(fert.name)}» в график подкормки: ${n} ${plural(n, 'цветок', 'цветка', 'цветков')}. Напомню, кого поливать с удобрением.`
+        : `🧪 Записала «${esc(fert.name)}». Сейчас никого подкармливать не надо, напомню, когда будет пора.`);
+    }
+    return db.buildState(uid);
   }
 
   // Гостевой доступ: ссылка-приглашение, список гостей, закрыть доступ, отказаться от чужих цветов.
@@ -139,7 +163,15 @@ async function api(uid, path, req) {
   if (!plant) throw fail('Нет такого цветка');
 
   if (path === '/api/water') {
-    await db.toggleWater(plant.id, today);
+    if (body.feed && plant.feed) {
+      // Полив с удобрением: отмечаем и полив, и подкормку. Повторное нажатие снимает обе отметки.
+      const fed = plant.feed.last === today;
+      await Promise.all([db.setWatered(plant.id, today, !fed), db.markFed(g, plant.id, plant.feed, today, !fed)]);
+    } else {
+      await db.toggleWater(plant.id, today);
+    }
+  } else if (path === '/api/plant/feed') {
+    await db.setFeedEvery(uid, plant, Math.min(120, Math.max(0, Math.round(Number(body.every)) || 0)));
   } else if (path === '/api/water/last') {
     if (!validDay(body.day, today)) throw fail('Выбери день не позже сегодняшнего и не раньше, чем год назад');
     await db.setLastWatering(plant.id, body.day);

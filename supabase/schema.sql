@@ -63,3 +63,17 @@ create table if not exists scan_runs (
 );
 create index if not exists scan_runs_created_at on scan_runs (created_at desc);
 alter table scan_runs enable row level security;
+
+-- Удобрения: что сфоткали и какой график подкормки предложила модель. У цветка в plants.feed — его удобрение,
+-- как часто подкармливать и когда подкармливали последний раз.
+create table if not exists fertilizers (
+  id text primary key,
+  user_id bigint not null references users(id) on delete cascade,
+  name text not null,
+  info jsonb not null default '{}'::jsonb,   -- kind, npk, form, dose, note, plan, applied
+  photo_path text,
+  created_at timestamptz not null default now()
+);
+create index if not exists fertilizers_user_id on fertilizers(user_id);
+alter table fertilizers enable row level security;
+alter table plants add column if not exists feed jsonb;

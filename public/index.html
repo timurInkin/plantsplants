@@ -3,7 +3,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Мои цветы</title>
-<link rel="preload" href="/fonts/icons.woff2?v=1" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/fonts/icons.woff2?v=2" as="font" type="font/woff2" crossorigin>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <style>
 :root {
@@ -21,7 +21,7 @@
 * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
 /* Шрифты лежат у нас, а не в Google Fonts: у части людей Google Fonts не грузится, и вместо значков видны слова.
    icons.woff2 — только значки, которые есть в app.js. Новый значок — пересобрать файл (см. README) и поднять ?v=. */
-@font-face { font-family:'Material Symbols Rounded'; font-style:normal; font-weight:300 500; font-display:block; src:url(/fonts/icons.woff2?v=1) format('woff2'); }
+@font-face { font-family:'Material Symbols Rounded'; font-style:normal; font-weight:300 500; font-display:block; src:url(/fonts/icons.woff2?v=2) format('woff2'); }
 @font-face { font-family:'Manrope'; font-style:normal; font-weight:300 600; font-display:swap; src:url(/fonts/manrope-cyrillic.woff2) format('woff2'); unicode-range:U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116; }
 @font-face { font-family:'Manrope'; font-style:normal; font-weight:300 600; font-display:swap; src:url(/fonts/manrope-latin.woff2) format('woff2'); unicode-range:U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD; }
 body { margin:0; background:var(--bg); color:var(--text); font:15px/1.4 Manrope, -apple-system, "Segoe UI", Roboto, sans-serif; -webkit-font-smoothing:antialiased; }
@@ -188,6 +188,15 @@ h3 { margin:0; font-size:19px; font-weight:500; letter-spacing:-.02em; }
 .gardens button .ms { font-size:17px; }
 .gardens button.on { background:var(--ink); color:var(--ink-text); }
 .loading.small { min-height:80px; }
+
+/* Полив с удобрением */
+.card.feed { padding:14px 16px 12px 18px; }
+.card.feed .tag { background:var(--lime); color:var(--lime-text); }
+.card.feed .tag-row small { color:var(--muted); }
+.card.feed .rows { margin-top:8px; }
+.card.feed .pill { margin-top:10px; }
+.feed-why { margin:10px 4px 0; font-size:13px; color:var(--muted); }
+.link-row + .feed-why { margin:-6px 0 14px; }
 
 /* Сорт вручную */
 .edit-name { align-self:flex-start; display:inline-flex; align-items:center; gap:5px; margin:-8px 4px 0; padding:4px 0; border:0; background:none; color:var(--sage-dark); font-size:13.5px; font-weight:500; cursor:pointer; }

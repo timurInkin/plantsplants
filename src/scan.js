@@ -13,6 +13,7 @@ const ROLE = `Ты ботаник и фитопатолог с большим о
 const SCHEMA = `Ответь ТОЛЬКО JSON без пояснений и без markdown, строго по схеме:
 {
   "is_plant": true, если на фото есть растение; false, если растения нет совсем (животное, человек, еда, предмет),
+  "is_fertilizer": true, если вместо растения на фото упаковка удобрения или подкормки для растений, иначе false,
   "name": "название по-русски, как в цветочном магазине; сорт, если узнаётся (например «Аглаонема Мария»)",
   "latin": "род и вид латынью, сорт в кавычках, если узнаётся (например Aglaonema commutatum 'Maria')",
   "confidence": "high | medium | low",
@@ -39,7 +40,7 @@ const SCHEMA = `Ответь ТОЛЬКО JSON без пояснений и бе
   Пиши как просьбу другу, без терминов: «сфоткай горшок снизу: видно ли корни в дырках», а не «оценить корни в дренаже».
   Пока фото нет, в соответствующем поле честно скажи, что не видно, и ставь pot unknown, если про горшок нельзя сказать уверенно.
 - В todo не советуй вынимать растение и смотреть корни, если нет явных признаков беды с корнями (вялость при мокром грунте, запах, корни лезут из дырок).
-- Если растения на фото нет (is_plant false), не притворяйся: в status_text коротко и по-доброму скажи, что на фото вместо растения, можно с лёгкой иронией, до 10 слов (например «На фото кот, растений не видно»). name — «Не растение», остальные поля пустые, todo и need_photos пустые.
+- Если растения на фото нет (is_plant false), не притворяйся: в status_text коротко и по-доброму скажи, что на фото вместо растения, можно с лёгкой иронией, до 10 слов (например «На фото кот, растений не видно»; для удобрения — «Это удобрение» и название с упаковки). name — «Не растение», остальные поля пустые, todo и need_photos пустые.
 - photos: если фото больше одного, по объекту на каждое фото, начиная со второго (первое — общий план, его разбор в остальных полях). Если фото одно, пустой массив.
   Пиши про то, что видно именно на этом фото. Например, на фото один жёлтый лист: это перелив, нехватка света или старый лист отмирает, и срезать ли его.
 - status: ok — здоровое и растёт; watch — есть мелочи или ранние симптомы; help — нужно лечить сейчас.
@@ -88,11 +89,11 @@ const TYPOS = [
   [/(^|\s)([Сс]) шкаф/g, '$1$2о шкаф'], [/(^|\s)([Вв]) временн/g, '$1$2о временн'],
 ];
 const fixTypos = (s) => TYPOS.reduce((t, [re, to]) => t.replace(re, to), s);
-const cut = (s, n) => fixTypos(String(s || '').trim()).slice(0, n);
+export const cut = (s, n) => fixTypos(String(s || '').trim()).slice(0, n);
 const oneOf = (v, list, d) => (list.includes(v) ? v : d);
 
 // Ищем JSON в тексте: модель может обернуть его в ```json или добавить слова до и после.
-function findJSON(text) {
+export function findJSON(text) {
   const m = String(text || '').match(/\{[\s\S]*\}/);
   if (!m) return null;
   try { return JSON.parse(m[0]); } catch { return null; }
@@ -103,6 +104,7 @@ export function normalizeScan(r) {
   const notPlant = r.is_plant === false || /^не\s+растение/i.test(String(r.name || '').trim());
   return {
     ...(notPlant ? { notPlant: true } : {}),
+    ...(notPlant && r.is_fertilizer === true ? { fertilizer: true } : {}),
     name: cut(r.name, 60) || 'Неизвестный цветок',
     latin: cut(r.latin, 60),
     confidence: oneOf(r.confidence, ['high', 'medium', 'low'], 'medium'),
@@ -136,7 +138,7 @@ function reasoningParam(effort) {
   return { reasoning: effort === 'off' ? { enabled: false } : { effort } };
 }
 
-async function chat(model, content, { maxTokens, json = false, effort = '' } = {}) {
+export async function chat(model, content, { maxTokens, json = false, effort = '' } = {}) {
   const t0 = Date.now();
   const res = await fetch(config.llmBaseUrl + '/chat/completions', {
     method: 'POST',
