@@ -51,6 +51,9 @@ function app() {
   let share = null;         // { status: 'loading' | 'done' | 'error', link, guests, error }
   let pickDay = null;       // у какого цветка открыт выбор дня последнего полива
   const plantSlides = {};   // какое фото открыто в галерее карточки цветка: { id: номер }
+  let done = null;          // экран «Готово»: { title, sub, text, photo, icon, plant, next }
+  let editVariety = null;   // где открыта правка сорта: 'scan' или id цветка
+  let draft = { name: '', latin: '' }; // что набрано в полях сорта
   let busy = false;
 
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -58,6 +61,18 @@ function app() {
   const plural = (n, a, b, c) => { const m = n % 10, h = n % 100; return m === 1 && h !== 11 ? a : m >= 2 && m <= 4 && (h < 10 || h >= 20) ? b : c; };
   const days = (n) => n + ' ' + plural(n, 'день', 'дня', 'дней');
   const haptic = () => { try { tg.HapticFeedback.impactOccurred('light'); } catch (e) {} };
+  // Получилось: телефон коротко вибрирует, внизу на пару секунд всплывает подтверждение.
+  let toastTimer = null;
+  function success(text) {
+    try { tg.HapticFeedback.notificationOccurred('success'); } catch (e) {}
+    if (!text) return;
+    let el = document.querySelector('.toast');
+    if (!el) { el = document.createElement('div'); el.className = 'toast'; el.setAttribute('role', 'status'); document.body.appendChild(el); }
+    el.innerHTML = '<span class="ms">check</span><span>' + esc(text) + '</span>';
+    requestAnimationFrame(() => el.classList.add('on'));
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => el.classList.remove('on'), 2200);
+  }
   // Иконки: Google Material Symbols (Rounded)
   const ms = (name) => '<span class="ms">' + name + '</span>';
   const byId = (id) => state.plants.find((p) => p.id === id);
@@ -137,6 +152,7 @@ function app() {
       (s.pot !== 'unknown' ? fact('potted_plant', s.potText || POT[s.pot][0]) : '') +
       fact('water_drop', 'раз в ' + days(s.every) + (s.waterText ? ', ' + lower(s.waterText) : '')) +
       (s.light ? fact('light_mode', s.light) : '') +
+      (s.manual ? fact('edit', 'сорт указан вручную') : '') +
       (s.identified ? fact('biotech', (s.identified.disputed ? s.identified.source + ' думает иначе: ' : 'вид по ' + s.identified.source + ': ') + s.identified.latin + ', ' + Math.round(s.identified.score * 100) + '%') : '') + '</ul>';
   }
 
@@ -165,6 +181,42 @@ function app() {
         d.todo.map((t) => fact('arrow_right_alt', t)).join('') + '</ul></section>';
     }
     if (remove) h += '<button class="link-btn" ' + remove + '>' + ms('delete') + 'Убрать это фото</button>';
+    return h;
+  }
+
+  // Сорт вручную: ссылка под названием, по нажатию — поля. where — 'scan' или id цветка.
+  function varietyBlock(where, s) {
+    if (editVariety !== where) {
+      return '<button class="edit-name" data-action="variety-open" data-where="' + esc(where) + '">' + ms('edit') + (s.manual ? 'Изменить сорт' : 'Не тот сорт? Исправить') + '</button>';
+    }
+    const inPlant = where !== 'scan';
+    return '<section class="card"><div class="card-head"><div><h3>Какой это сорт</h3><p>' +
+      (inPlant ? 'сканер больше не будет его менять' : 'пересчитаю советы под этот сорт') + '</p></div>' +
+      '<button class="circle" data-action="variety-cancel" aria-label="Закрыть">' + ms('close') + '</button></div>' +
+      '<label class="field"><span>Название</span><input data-draft="name" value="' + esc(draft.name) + '" placeholder="например, Аглаонема Мария" maxlength="60" autocomplete="off"></label>' +
+      '<label class="field"><span>Латынью, если знаешь</span><input data-draft="latin" value="' + esc(draft.latin) + '" placeholder="например, Aglaonema \'Maria\'" maxlength="80" autocomplete="off" autocapitalize="off"></label>' +
+      (inPlant
+        ? '<button class="pill" data-action="variety-save" data-recheck="1"><span>Сохранить и обновить советы</span><i>' + ms('auto_awesome') + '</i></button>' +
+          '<button class="link-btn" data-action="variety-save">Только сохранить название</button>'
+        : '<button class="pill" data-action="variety-recheck"><span>Пересчитать советы</span><i>' + ms('auto_awesome') + '</i></button>') +
+      '</section>';
+  }
+
+  // ── Готово ── После сохранения скана и удаления цветка.
+  function viewDone() {
+    if (!done) return viewToday();
+    const p = done.plant && byId(done.plant);
+    let h = '<section class="done"><span class="done-pic' + (done.photo ? '' : ' empty') + '">' +
+      (done.photo ? '<img src="' + esc(done.photo) + '" alt="">' : ms(done.icon || 'potted_plant')) +
+      '<span class="done-badge">' + ms('check') + '</span></span>' +
+      '<h1>' + esc(done.title) + (done.sub ? '<br><span>' + esc(done.sub) + '</span>' : '') + '</h1>' +
+      (done.text ? '<p>' + esc(done.text) + '</p>' : '') + '</section>';
+    if (p) {
+      h += '<button class="pill" data-open="' + p.id + '"><span>Открыть карточку</span><i>' + ms('arrow_forward') + '</i></button>' +
+        '<button class="link-btn" data-go="scan">' + ms('photo_camera') + 'Проверить ещё один цветок</button>';
+    } else {
+      h += '<button class="pill" data-go="plants"><span>К моим цветам</span><i>' + ms('arrow_forward') + '</i></button>';
+    }
     return h;
   }
 
@@ -256,6 +308,7 @@ function app() {
       h += '<section class="hero-photo">' + pic(p, 'photo') + '</section>';
       h += headline(p.name, s && s.latin ? s.latin : '');
     }
+    if (s && own()) h += varietyBlock(p.id, s);
     if (s) h += scanChips(s);
 
     h += '<section class="card"><div class="card-head"><div><h3>Полив</h3><p>' +
@@ -319,6 +372,10 @@ function app() {
       h += '<section class="hero-photo"><span class="photo"><img src="' + scan.preview + '" alt=""></span>' +
         (scan.status === 'loading' ? '<span class="scanning"><i></i></span>' : '') + '</section>';
     }
+    if (scan.status === 'loading' && scan.recheck) {
+      return h + headline('Пересчитываю советы', 'под сорт «' + scan.recheck + '», обычно меньше минуты') +
+        '<p class="wait-line"><b id="elapsed">' + clock(scan.started) + '</b><span>' + esc(scan.stage || 'Смотрю на фото с учётом сорта…') + '</span></p>';
+    }
     if (scan.status === 'loading') {
       return h + headline('Смотрю…', scan.detail ? 'деталь вместе с фото цветка, обычно меньше минуты' : scanMore ? 'вместе с прошлыми фото, обычно меньше минуты' : 'обычно меньше минуты') +
         '<p class="wait-line"><b id="elapsed">' + clock(scan.started) + '</b><span>' + esc(scan.stage || 'Определяю вид, разглядываю листья, грунт и горшок…') + '</span></p>';
@@ -330,8 +387,8 @@ function app() {
     if (slide > 0) {
       h += headline(s.name, s.latin) + detailCard((s.details || [])[slide - 1], slide, shots.length, 'data-action="drop-shot" data-i="' + slide + '"');
     } else {
-      h += headline(s.name, s.latin) + scanChips(s);
-      if (s.confidence === 'low') h += '<p class="note">Не до конца уверена, что это он. Можно сфоткать поближе.</p>';
+      h += headline(s.name, s.latin) + varietyBlock('scan', s) + scanChips(s);
+      if (s.confidence === 'low' && !s.manual) h += '<p class="note">Не до конца уверена, что это он. Можно сфоткать поближе.</p>';
       h += '<section class="card">' + scanFacts(s) + '</section>' + todoCard(s);
     }
     if (slide === 0 && s.needPhotos && s.needPhotos.length) {
@@ -340,7 +397,9 @@ function app() {
         s.needPhotos.map((t) => fact('add_a_photo', t)).join('') + '</ul>' +
         '<button class="pill" data-action="shoot-more"><span>Доснять</span><i>' + ms('photo_camera') + '</i></button></section>';
     }
-    if (scan.photos > 1) {
+    if (scan.recheck) {
+      if (!scan.fromPlant) h += '<button class="link-btn" data-action="scan-undo">' + ms('undo') + 'Вернуть как было до сорта</button>';
+    } else if (scan.photos > 1) {
       h += '<button class="link-btn" data-action="scan-undo">' + ms('undo') + (scan.detail && scan.photos === 2 ? 'Вернуть как было в карточке' : 'Вернуть прошлый результат, без последнего фото') + '</button>';
     }
     // Куда сохранить. Новый цветок всегда можно выбрать, а обновить карточку, на которую скан не похож, только после вопроса.
@@ -397,12 +456,13 @@ function app() {
       root.innerHTML = '<div class="loading">' + (error ? esc(error) : '<span class="spinner"></span>') + '</div>';
       return;
     }
-    const tab = route.startsWith('plant/') || route === 'share' ? 'plants' : route;
+    const tab = route.startsWith('plant/') || route === 'share' || route === 'done' ? 'plants' : route;
     let view;
     if (route.startsWith('plant/')) view = viewPlant(route.slice(6));
     else if (route === 'plants') view = viewPlants();
     else if (route === 'scan') view = viewScan();
     else if (route === 'share') view = viewShare();
+    else if (route === 'done') view = viewDone();
     else view = viewToday();
     patch(root, '<nav class="tabs">' + TABS.filter((t) => own() || t[0] !== 'scan').map((t) => '<button data-go="' + t[0] + '" class="' + (t[0] === tab ? 'on' : '') + '">' +
       (t[0] === 'scan' ? ms('photo_camera') : '') + t[1] + '</button>').join('') +
@@ -468,6 +528,7 @@ function app() {
   function go(r) {
     // Скан всегда про свои цветы: из чужих сначала возвращаемся к своим.
     if ((r === 'scan' || r === 'share') && !own()) return switchGarden(null, r);
+    if (r !== route) editVariety = null;
     route = r;
     history.replaceState(null, '', '#' + r);
     render(); window.scrollTo(0, 0);
@@ -484,7 +545,7 @@ function app() {
     if (busy) return;
     busy = true;
     if (btn) btn.classList.add('wait');
-    try { setState(await fn()); render(); } catch (e) { if (btn) btn.classList.remove('wait'); oops(e); } finally { busy = false; }
+    try { setState(await fn()); render(); return true; } catch (e) { if (btn) btn.classList.remove('wait'); oops(e); return false; } finally { busy = false; }
   }
 
   // Полив отмечаем на экране сразу, а сервер догоняет. Нажатия идут в очередь, экран обновляется по последнему ответу.
@@ -531,7 +592,9 @@ function app() {
     if (!day) return;
     haptic();
     pickDay = null;
-    act(() => api('/api/water/last', { plant, day }), btn);
+    act(() => api('/api/water/last', { plant, day }), btn).then((ok) => {
+      if (ok) success('Последний полив: ' + (day === state.today ? 'сегодня' : day === addDays(state.today, -1) ? 'вчера' : shortLabel(day)));
+    });
   }
 
   // Фото: ужимаем до 1024px по длинной стороне прямо на телефоне.
@@ -579,41 +642,48 @@ function app() {
     throw new Error('Скан слишком долго думает, попробуй ещё раз');
   }
 
+  // Скан или пересчёт идёт в фоне: start() отправляет запрос и возвращает номер задачи, init — что показать, пока ждём.
+  // Если не вышло и есть прошлый результат, возвращаем его. onFail может взять ошибку на себя (вернуть true).
   let scanSeq = 0;
-  camera.addEventListener('change', async () => {
-    const file = camera.files[0];
-    camera.value = '';
-    if (!file) return;
+  async function runScan(start, init, onFail) {
     const seq = ++scanSeq;
     const isCurrent = () => seq === scanSeq;
+    scan = { status: 'loading', started: Date.now(), ...init };
+    go('scan');
     try {
-      const img = await shrink(file);
-      // При досъёмке сверху остаётся первое, основное фото.
-      // Сверху всегда фото, которое только что сняли. Прошлый результат помним: если досъёмка не удастся, вернём его.
-      const keep = scanMore && scan && scan.result ? scan : null;
-      const plant = scanDetail && byId(scanTarget);
-      const detail = !!plant || !!(keep && keep.detail);
-      scan = {
-        status: 'loading', preview: img.preview, lastPreview: img.preview, prev: keep,
-        target: scanTarget, detail, started: Date.now(),
-      };
-      go('scan');
-      const { job } = await api('/api/scan' + (scanMore ? '?more=1' : plant ? '?plant=' + encodeURIComponent(plant.id) : ''), img.blob, true);
+      const { job } = await start();
       const res = await waitForScan(job, isCurrent);
       if (!res || !isCurrent()) return;
       const n = res.photos || 1;
-      scan = { ...scan, status: 'done', result: res.scan, photos: n, shots: res.shots || [], slide: n - 1, prev: null };
+      // После пересчёта открыт общий вывод, после нового фото — разбор этого фото.
+      scan = { ...scan, status: 'done', result: res.scan, photos: n, shots: res.shots || [], slide: init.recheck ? 0 : n - 1, prev: null };
+      if (init.recheck) success();
     } catch (e) {
       if (!isCurrent()) return;
-      // Досъёмка не удалась: оставляем прошлый результат, он на сервере тоже не тронут.
+      if (onFail && onFail(e)) return;
       if (scan && scan.prev) {
         scan = { ...scan.prev, status: 'done' };
         if (route === 'scan') render();
-        return alert('Не получилось доснять: ' + e.message + ' Оставила прошлый результат.');
+        return alert((init.recheck ? 'Не получилось пересчитать: ' : 'Не получилось доснять: ') + e.message + ' Оставила прошлый результат.');
       }
       scan = { ...(scan || {}), status: 'error', error: e.message };
     }
     if (route === 'scan') render();
+  }
+
+  camera.addEventListener('change', async () => {
+    const file = camera.files[0];
+    camera.value = '';
+    if (!file) return;
+    let img;
+    try { img = await shrink(file); } catch (e) { return alert(e.message); }
+    // Сверху всегда фото, которое только что сняли. Прошлый результат помним: если досъёмка не удастся, вернём его.
+    const keep = scanMore && scan && scan.result ? scan : null;
+    const plant = scanDetail && byId(scanTarget);
+    const detail = !!plant || !!(keep && keep.detail);
+    const path = '/api/scan' + (scanMore ? '?more=1' : plant ? '?plant=' + encodeURIComponent(plant.id) : '');
+    editVariety = null;
+    runScan(() => api(path, img.blob, true), { preview: img.preview, lastPreview: img.preview, prev: keep, target: scanTarget, detail });
   });
 
   function shoot(target, more, detail) {
@@ -634,8 +704,9 @@ function app() {
       if (!confirm('Убрать это фото и его разбор?')) return;
       haptic();
       const k = Number(d.i);
-      await act(() => api('/api/plant/detail/delete', { plant: d.unshot, i: k }), b);
+      if (!(await act(() => api('/api/plant/detail/delete', { plant: d.unshot, i: k }), b))) return;
       plantSlides[d.unshot] = k + 1; // открываем следующее фото, а если убрали последнее, то предыдущее
+      success('Фото убрала');
       return render();
     }
     if (d.garden) return switchGarden(Number(d.garden));
@@ -647,35 +718,47 @@ function app() {
       const every = Number(d.every);
       if (!p || every < 1 || every > 60) return;
       haptic();
-      return act(() => api('/api/plant/update', { plant: p.id, every }), b);
+      if (await act(() => api('/api/plant/update', { plant: p.id, every }), b)) success('Полив раз в ' + days(every));
+      return;
     }
     if (d.rescan) return shoot(d.rescan);
     if (d.detail) return shoot(d.detail, false, true);
     if (d.delete) {
       const p = byId(d.delete);
       if (!confirm('Удалить «' + p.name + '»?')) return;
-      await act(() => api('/api/plant/delete', { plant: p.id }));
-      return go('plants');
+      if (!(await act(() => api('/api/plant/delete', { plant: p.id }), b))) return;
+      done = { title: 'Убрала из коллекции', sub: p.name, icon: 'potted_plant' };
+      success();
+      return go('done');
     }
     if (d.save) {
       const p = d.save !== 'new' && byId(d.save);
       if (p && !d.sure && sameKind(p, scan && scan.result) === false &&
         !confirm('На фото, похоже, другой цветок: ' + scan.result.name + '. Всё равно обновить «' + p.name + '»?')) return;
       haptic();
-      let saved = null;
-      await act(async () => { const r = await api('/api/scan/save', { target: d.save }); saved = r.saved; return r; }, b);
-      if (saved) { scan = null; go('plant/' + saved); }
-      return;
+      let r = null;
+      if (!(await act(async () => (r = await api('/api/scan/save', { target: d.save })), b)) || !r.saved) return;
+      const p2 = byId(r.saved);
+      done = {
+        title: r.isNew ? 'Добавила в цветы' : 'Обновила карточку', sub: p2 ? p2.name : '', photo: p2 && p2.photo, plant: r.saved,
+        text: r.isNew ? 'Полив раз в ' + days(p2 ? p2.every : 7) + '. В карточке отметь, когда поливала последний раз, и я начну напоминать.' : 'Новые фото и советы уже в карточке.',
+      };
+      scan = null; editVariety = null;
+      success();
+      return go('done');
     }
     if (d.unshare) {
       const g = share.guests.find((x) => String(x.id) === d.unshare);
       if (!confirm('Закрыть доступ для ' + (g ? g.name : 'гостя') + '?')) return;
-      return loadShare('/api/share/remove', { guest: Number(d.unshare) });
+      await loadShare('/api/share/remove', { guest: Number(d.unshare) });
+      if (share && share.status === 'done') success('Доступ закрыт');
+      return;
     }
     if (d.leave) {
       const g = state.gardens.find((x) => String(x.id) === d.leave);
       if (!confirm('Больше не присматривать за цветами: ' + (g ? g.name : '') + '?')) return;
       try { await api('/api/share/leave', { owner: Number(d.leave) }); } catch (err) { return alert(err.message); }
+      success('Эти цветы больше не в твоём списке');
       return switchGarden(null, 'share');
     }
     if (d.action === 'share-open') { share = null; go('share'); return loadShare('/api/share'); }
@@ -687,7 +770,7 @@ function app() {
     }
     if (d.action === 'share-copy' && share && share.link) {
       const link = share.link;
-      return navigator.clipboard.writeText(link).then(() => alert('Ссылка скопирована'), () => prompt('Скопируй ссылку', link));
+      return navigator.clipboard.writeText(link).then(() => success('Ссылка скопирована'), () => prompt('Скопируй ссылку', link));
     }
     if (d.action === 'share-reset') {
       if (!confirm('Сделать новую ссылку? По старой больше никто не сможет зайти. У тех, кто уже зашёл, доступ останется.')) return;
@@ -700,8 +783,10 @@ function app() {
       b.classList.add('wait');
       try {
         const r = await api('/api/scan/undo', {});
-        scan = { ...scan, status: 'done', result: r.scan, photos: r.photos || 1, shots: r.shots || [], slide: 0, lastPreview: null };
+        scan = { ...scan, status: 'done', result: r.scan, photos: r.photos || 1, shots: r.shots || [], slide: 0, lastPreview: null, recheck: null, fromPlant: false };
+        editVariety = null;
         render(); window.scrollTo(0, 0);
+        success('Вернула прошлый результат');
       } catch (err) { b.classList.remove('wait'); alert(err.message); }
       return;
     }
@@ -713,12 +798,60 @@ function app() {
         const r = await api('/api/scan/drop', { i: Number(d.i) });
         scan = { ...scan, result: r.scan, photos: r.photos, shots: r.shots || [], slide: Math.min(Number(d.i), r.photos - 1), lastPreview: null };
         render();
+        success('Фото убрала');
       } catch (err) { b.classList.remove('wait'); alert(err.message); }
       return;
     }
     if (d.action === 'scan-reset') { scan = null; scanSeq++; return go('scan'); }
     if (d.action === 'theme') { haptic(); setTheme(isDark() ? 'light' : 'dark'); return render(); }
-    if (d.action === 'water-all') { haptic(); return act(() => api('/api/water-all', {}), b); }
+    if (d.action === 'water-all') { haptic(); if (await act(() => api('/api/water-all', {}), b)) success('Отметила полив у всех'); return; }
+
+    // Сорт вручную.
+    if (d.action === 'variety-open') {
+      const p = d.where !== 'scan' && byId(d.where);
+      const s = p ? p.scan : scan && scan.result;
+      if (!s) return;
+      editVariety = d.where;
+      // Латынь не подставляем: если модель ошиблась с видом, старая латынь тоже неверная.
+      draft = { name: p ? p.name : s.name || '', latin: s.manual ? s.latin || '' : '' };
+      render();
+      const input = root.querySelector('input[data-draft="name"]');
+      if (input) { input.focus(); input.select(); }
+      return;
+    }
+    if (d.action === 'variety-cancel') { editVariety = null; return render(); }
+    if (d.action === 'variety-save' || d.action === 'variety-recheck') {
+      const name = draft.name.trim(), latin = draft.latin.trim();
+      if (!name) return alert('Напиши название сорта');
+      haptic();
+      if (d.action === 'variety-recheck') {
+        // Незавершённый скан: пересчитываем его, прошлый результат помним на случай ошибки.
+        const keep = scan;
+        editVariety = null;
+        return runScan(() => api('/api/scan/recheck', { name, latin }), {
+          preview: (keep.shots && keep.shots[0]) || keep.preview, prev: keep, target: keep.target, detail: keep.detail, recheck: name,
+        });
+      }
+      const p = byId(editVariety);
+      if (!p) return;
+      const recheck = !!d.recheck;
+      if (!(await act(() => api('/api/plant/variety', { plant: p.id, name, latin, quiet: recheck }), b))) return;
+      editVariety = null;
+      if (!recheck) { render(); return success('Записала сорт'); }
+      return runScan(() => api('/api/scan/recheck', { plant: p.id }), {
+        preview: p.photo, target: p.id, detail: !!(p.scan && p.scan.details && p.scan.details.length), recheck: name, fromPlant: true,
+      }, (e) => {
+        scan = null;
+        go('plant/' + p.id);
+        alert('Сорт записала, а советы пересчитать не получилось: ' + e.message);
+        return true;
+      });
+    }
+  });
+
+  root.addEventListener('input', (e) => {
+    const k = e.target.dataset && e.target.dataset.draft;
+    if (k) draft[k] = e.target.value;
   });
 
   // Выбор дня в календаре («раньше»).

@@ -42,7 +42,8 @@ const SCHEMA = `Ответь ТОЛЬКО JSON без пояснений и бе
   Пиши про то, что видно именно на этом фото. Например, на фото один жёлтый лист: это перелив, нехватка света или старый лист отмирает, и срезать ли его.
 - status: ok — здоровое и растёт; watch — есть мелочи или ранние симптомы; help — нужно лечить сейчас.
 - pot: small — корни в дренаже или ком плотно оплетён, крона намного шире горшка; big — горшок явно больше корневой системы (риск закисания); unknown — горшка не видно.
-- Пиши коротко и спокойно, по-разговорному, без канцелярита, но точно, как специалист.`;
+- Пиши коротко и спокойно, по-разговорному, без канцелярита, но точно, как специалист.
+- Пиши грамотно: без опечаток, с правильной орфографией и пунктуацией, названия растений по-русски как принято (Аглаонема, Сенполия, Филодендрон). Перед ответом перечитай тексты.`;
 
 // Один шаг: модель для фото сразу отвечает по схеме.
 const SCAN_PROMPT = `${ROLE}
@@ -79,7 +80,13 @@ ${extra}
 Дай уход именно для этого вида и этого состояния.
 ${SCHEMA}`;
 
-const cut = (s, n) => String(s || '').trim().slice(0, n);
+// Опечатки, которые модель уже делала: правим их в ответе, даже если она снова ошибётся.
+const TYPOS = [
+  [/ночниц/g, 'ножниц'], [/([Аа])глонем/g, '$1глаонем'], [/тургор хорошая/g, 'тургор хороший'],
+  [/(^|\s)([Сс]) шкаф/g, '$1$2о шкаф'], [/(^|\s)([Вв]) временн/g, '$1$2о временн'],
+];
+const fixTypos = (s) => TYPOS.reduce((t, [re, to]) => t.replace(re, to), s);
+const cut = (s, n) => fixTypos(String(s || '').trim()).slice(0, n);
 const oneOf = (v, list, d) => (list.includes(v) ? v : d);
 
 // Ищем JSON в тексте: модель может обернуть его в ```json или добавить слова до и после.
@@ -202,7 +209,10 @@ function extras(references, note, count = 1, prior = null, forLook = false, deta
     t += '\nПервое фото основное для определения вида. Остальные досняты по просьбе: горшок, грунт, листья поближе.';
     t += forLook ? '\n' : ` Это уже ${count} фото, ещё фото проси, только если без них вывод будет неверным.\n`;
   }
-  if (prior?.latin) {
+  if (prior?.manual) {
+    t += `\nХозяйка точно знает, что это ${prior.name}${prior.latin ? ` (${prior.latin})` : ''}. Это не обсуждается: не меняй вид и сорт, ` +
+      'ставь диагноз и давай уход именно для этого сорта. В name напиши это название, в latin — латынь этого сорта.\n';
+  } else if (prior?.latin) {
     t += `\nПо первым фото растение уже определено как ${prior.name} (${prior.latin}). Не меняй вид, если на новых фото нет явного признака другого вида: ` +
       'досъёмка нужна, чтобы уточнить состояние, горшок и грунт.\n';
   }
@@ -222,7 +232,8 @@ export async function scanPhoto(images, note = '', onStage = null, prior = null,
   const pics = images.map((b) => ({ type: 'image_url', image_url: { url: 'data:image/jpeg;base64,' + Buffer.from(b).toString('base64') } }));
   let guess = '';
   const say = (text) => { try { onStage?.(text); } catch {} };
-  const refsJob = step('справочники', lookUpReferences(images)).then((r) => {
+  // Сорт указан вручную: справочники не нужны, Pl@ntNet подсказал бы другое растение.
+  const refsJob = prior?.manual ? Promise.resolve({ text: '' }) : step('справочники', lookUpReferences(images)).then((r) => {
     if (r.identified) {
       guess = `Похоже, это ${r.identified.latin} (${Math.round(r.identified.score * 100)}% по Pl@ntNet). `;
       say(guess + 'Разглядываю листья, грунт и горшок…');
@@ -255,7 +266,14 @@ export async function scanPhoto(images, note = '', onStage = null, prior = null,
   }
   scan.details = alignDetails(scan.details, images.length);
   const genus = (l) => String(l || '').trim().split(/\s+/)[0].toLowerCase();
-  if (prior?.latin && genus(scan.latin) === genus(prior.latin)) {
+  if (prior?.manual) {
+    // Сорт знает человек: название оставляем его, латынь его или ту, что подобрала модель под это название.
+    scan.name = prior.name || scan.name;
+    if (prior.latin) scan.latin = prior.latin;
+    scan.confidence = 'high';
+    scan.manual = true;
+    delete scan.identified;
+  } else if (prior?.latin && genus(scan.latin) === genus(prior.latin)) {
     // Вид уже определили по первым фото. Новые фото обычно крупные планы, по ним Pl@ntNet узнаёт хуже,
     // поэтому оставляем то определение и ту уверенность, а не пугаем «не уверена, что это он».
     delete scan.identified;

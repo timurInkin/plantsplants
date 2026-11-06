@@ -18,7 +18,39 @@ const html = (s) => String(s ?? '').replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<
 // (в течение 30 минут) или если фото пришли подряд, пачкой (в течение 2 минут).
 // В приложении для этого есть кнопка, поэтому там новое фото без «Доснять» всегда начинает новый скан.
 export async function scanForUser(uid, bytes, note = '', more = false, auto = true, onStage = null, plantId = null) {
-  // Каждый скан записываем в scan_runs: сколько шёл, на каких шагах и какие модели отвечали.
+  return logged(uid, () => (plantId ? detailScan(uid, plantId, bytes, note, onStage) : joinScan(uid, bytes, note, more, auto, onStage)));
+}
+
+// Пересчитать скан под сорт, который человек знает точно: по фото цветка из коллекции (plant)
+// или по фото незавершённого скана. Вид и сорт сканер уже не меняет, только состояние и советы.
+export async function recheckForUser(uid, { plant: plantId, name, latin }, onStage = null) {
+  return logged(uid, async () => {
+    const fail = (m) => Object.assign(new Error(m), { status: 400 });
+    let images, prior, detail;
+    if (plantId) {
+      const plant = await getPlant(uid, plantId);
+      if (!plant?.scan) throw fail('Сначала отсканируй этот цветок');
+      images = await plantImages(plant);
+      if (!images.length) throw fail('У цветка нет фото, сфоткай его');
+      await Promise.all(images.map((b, i) => uploadPending(uid, i, b)));
+      prior = { ...plant.scan, photos: images.length };
+      detail = images.length > 1;
+    } else {
+      const p = (await getUser(uid))?.pending_scan;
+      if (!p?.photos) throw fail('Скан потерялся, сфоткай ещё раз');
+      images = await pendingImages(uid, p.photos);
+      prior = p;
+      detail = !!p.detail;
+    }
+    const identity = { ...prior, name: String(name || prior.name).trim().slice(0, 60), latin: String(latin ?? prior.latin ?? '').trim().slice(0, 80), manual: true };
+    const scan = await scanPhoto(images, '', onStage, identity, detail);
+    const at = await setPending(uid, { ...scan, ...(detail ? { detail } : {}) }, images.length, prior);
+    return { scan, photos: images.length, at };
+  });
+}
+
+// Каждый скан записываем в scan_runs: сколько шёл, на каких шагах и какие модели отвечали.
+async function logged(uid, run) {
   const t0 = Date.now();
   const log = (photos, error) => {
     const { steps, calls } = currentRun();
@@ -28,7 +60,7 @@ export async function scanForUser(uid, bytes, note = '', more = false, auto = tr
     }).catch(() => {});
   };
   try {
-    const r = plantId ? await detailScan(uid, plantId, bytes, note, onStage) : await joinScan(uid, bytes, note, more, auto, onStage);
+    const r = await run();
     log(r.photos);
     return r;
   } catch (e) {
@@ -64,7 +96,7 @@ async function detailScan(uid, plantId, bytes, note, onStage) {
   if (!plant) throw fail('Нет такого цветка');
   const old = (plant.scan?.details || []).filter((d) => d.path);
   if (old.length + 2 > MAX_SCAN_PHOTOS) throw fail(`В карточке уже ${old.length} фото деталей. Убери одно, чтобы добавить новое.`);
-  const had = (await Promise.all([plant.photo_path, ...old.map((d) => d.path)].map((p) => (p ? downloadPhoto(p) : null)))).filter(Boolean);
+  const had = await plantImages(plant);
   const images = [...had, bytes];
   const upload = Promise.all(images.map((b, i) => uploadPending(uid, i, b)));
   upload.catch(() => {});
@@ -73,6 +105,26 @@ async function detailScan(uid, plantId, bytes, note, onStage) {
   await upload;
   const at = await setPending(uid, { ...scan, detail: true }, images.length, prior);
   return { scan, photos: images.length, at };
+}
+
+// Фото цветка из коллекции: основное и доснятые детали.
+async function plantImages(plant) {
+  const paths = [plant.photo_path, ...(plant.scan?.details || []).map((d) => d.path)];
+  return (await Promise.all(paths.map((p) => (p ? downloadPhoto(p) : null)))).filter(Boolean);
+}
+
+// Сообщение в чат, что действие в приложении получилось. Если не дошло, ничего страшного: в приложении всё уже видно.
+export async function notify(uid, text, plantId = null) {
+  try {
+    const user = await getUser(uid);
+    if (!user?.chat_id) return;
+    await tg('sendMessage', {
+      chat_id: user.chat_id, text, parse_mode: 'HTML',
+      ...(plantId ? { reply_markup: { inline_keyboard: [[appButton('Открыть карточку', 'plant/' + plantId)]] } } : {}),
+    });
+  } catch (e) {
+    console.error('Не получилось написать в чат', e.message);
+  }
 }
 
 // Кнопки «Когда был последний полив?»: сегодня, вчера и ещё пять дней назад.

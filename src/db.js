@@ -84,6 +84,17 @@ export async function deleteDetail(uid, plant, i) {
   ]);
 }
 
+// Сорт, который человек знает точно. Сканер его больше не меняет (manual), а строчку Pl@ntNet убираем: она про другое растение.
+export async function setVariety(uid, plant, name, latin) {
+  const fields = { name };
+  if (plant.scan) {
+    const { identified: _i, ...scan } = plant.scan;
+    fields.scan = { ...scan, name, latin, manual: true, confidence: 'high' };
+  }
+  await updatePlant(uid, plant.id, fields);
+  return { ...plant, ...fields };
+}
+
 // Похоже ли растение в карточке на то, что на новом скане: сравниваем род по латыни.
 // false — точно разные растения, null — сравнить не по чему.
 const genus = (latin) => String(latin || '').trim().split(/\s+/)[0].toLowerCase();
@@ -230,6 +241,12 @@ export async function savePending(uid, target) {
   const path = paths[0];
   scan.details = (scan.details || []).slice(0, count - 1)
     .map((d, i) => (copied[i + 1] ? { seen: d.seen, means: d.means, todo: d.todo || [], path: paths[i + 1] } : null)).filter(Boolean);
+
+  // Сорт хозяйка указала сама: новый скан этого цветка его не меняет.
+  if (existing?.scan?.manual && !scan.manual) {
+    Object.assign(scan, { name: existing.scan.name, latin: existing.scan.latin || '', manual: true, confidence: 'high' });
+    delete scan.identified;
+  }
 
   let plant;
   if (existing) {

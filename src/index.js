@@ -8,7 +8,7 @@ import { todayLocal, hourLocal, validDay } from './dates.js';
 import * as db from './db.js';
 import { setupTelegram, webhookSecret, userFromInitData, botUsername } from './telegram.js';
 import { track } from './timing.js';
-import { handleUpdate, remind, scanForUser } from './bot.js';
+import { handleUpdate, remind, scanForUser, recheckForUser, notify } from './bot.js';
 
 const STATIC = {
   '/': ['index.html', 'text/html; charset=utf-8'],
@@ -39,8 +39,24 @@ const GUEST_OK = new Set(['/api/state', '/api/water', '/api/water/last', '/api/w
 // Последний скан из приложения у каждого человека: { id, status: working | done | error, stage, scan, photos, error }.
 const scanJobs = new Map();
 
+// Скан идёт в фоне, а приложение спрашивает /api/scan/status, пока не будет готово.
+function startScanJob(uid, label, run) {
+  const job = { id: crypto.randomBytes(6).toString('hex'), status: 'working' };
+  scanJobs.set(uid, job);
+  track(label, () => run((text) => { job.stage = text; })).then(
+    (r) => Object.assign(job, { status: 'done', scan: r.scan, photos: r.photos, shots: db.pendingShots(uid, r.photos, r.at) }),
+    (e) => {
+      if (!e.status) console.error(label + ' не удался', e);
+      Object.assign(job, { status: 'error', error: e.message || 'Что-то сломалось' });
+    });
+  return { job: job.id };
+}
+
 const fail = (message, extra = {}) => Object.assign(new Error(message), { status: 400, ...extra });
 const gone = () => fail('Доступ к этим цветам закрыли', { gone: true });
+
+const esc = (s) => String(s ?? '').replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+const plural = (n, a, b, c) => { const m = n % 10, h = n % 100; return m === 1 && h !== 11 ? a : m >= 2 && m <= 4 && (h < 10 || h >= 20) ? b : c; };
 
 async function shareInfo(uid, reset = false) {
   const [token, guests, name] = await Promise.all([db.shareToken(uid, reset), db.guestsOf(uid), botUsername()]);
@@ -69,15 +85,7 @@ async function api(uid, path, req) {
     if (!bytes.length) throw new Error('Пустое фото');
     const q = new URL(req.url, 'http://x').searchParams;
     const more = q.get('more') === '1', plant = q.get('plant') || null;
-    const job = { id: crypto.randomBytes(6).toString('hex'), status: 'working' };
-    scanJobs.set(uid, job);
-    track('скан из приложения', () => scanForUser(uid, bytes, '', more, false, (text) => { job.stage = text; }, plant)).then(
-      (r) => Object.assign(job, { status: 'done', scan: r.scan, photos: r.photos, shots: db.pendingShots(uid, r.photos, r.at) }),
-      (e) => {
-        if (!e.status) console.error('Скан из приложения не удался', e);
-        Object.assign(job, { status: 'error', error: e.message || 'Что-то сломалось' });
-      });
-    return { job: job.id };
+    return startScanJob(uid, 'скан из приложения', (onStage) => scanForUser(uid, bytes, '', more, false, onStage, plant));
   }
   if (path === '/api/scan/undo') {
     const r = await db.undoPending(uid);
@@ -94,13 +102,21 @@ async function api(uid, path, req) {
 
   const body = JSON.parse((await readBody(req, 100_000)).toString() || '{}');
 
+  // Пересчитать советы под сорт, который человек знает точно.
+  if (path === '/api/scan/recheck') {
+    if (!String(body.name || '').trim() && !body.plant) throw fail('Напиши название сорта');
+    return startScanJob(uid, 'пересчёт под сорт', (onStage) => recheckForUser(uid, { plant: body.plant || null, name: body.name, latin: body.latin }, onStage));
+  }
   if (path === '/api/scan/drop') {
     const r = await db.dropPending(uid, Number(body.i));
     return { ...r, shots: db.pendingShots(uid, r.photos, r.at) };
   }
   if (path === '/api/scan/save') {
-    const { plant } = await db.savePending(uid, body.target);
-    return { ...(await db.buildState(uid)), saved: plant.id };
+    const { plant, isNew } = await db.savePending(uid, body.target);
+    notify(uid, isNew
+      ? `🌿 Добавила «${esc(plant.name)}» в твои цветы. Полив раз в ${plant.every} ${plural(plant.every, 'день', 'дня', 'дней')}.`
+      : `🌿 Обновила «${esc(plant.name)}»: новые фото и советы.`, plant.id);
+    return { ...(await db.buildState(uid)), saved: plant.id, isNew };
   }
   if (path === '/api/water-all') {
     await db.waterAllDue(g, today);
@@ -134,6 +150,13 @@ async function api(uid, path, req) {
     await db.updatePlant(uid, plant.id, fields);
   } else if (path === '/api/plant/delete') {
     await db.deletePlant(uid, plant);
+    notify(uid, `🗑 Убрала «${esc(plant.name)}» из коллекции.`);
+  } else if (path === '/api/plant/variety') {
+    const name = String(body.name || '').trim().slice(0, 60);
+    if (!name) throw fail('Напиши название сорта');
+    const p = await db.setVariety(uid, plant, name, String(body.latin ?? '').trim().slice(0, 80));
+    // quiet: следом приложение пересчитает советы, и в чат напишем уже после сохранения нового скана.
+    if (!body.quiet) notify(uid, `✏️ Записала сорт: «${esc(p.name)}»${p.scan?.latin ? ` (<i>${esc(p.scan.latin)}</i>)` : ''}. Сканер его больше не поменяет.`, p.id);
   } else if (path === '/api/plant/detail/delete') {
     await db.deleteDetail(uid, plant, Number(body.i));
   } else {
