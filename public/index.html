@@ -3,7 +3,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Мои цветы</title>
-<link rel="preload" href="/fonts/icons.woff2?v=2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/fonts/icons.woff2?v=3" as="font" type="font/woff2" crossorigin>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <style>
 :root {
@@ -21,7 +21,7 @@
 * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
 /* Шрифты лежат у нас, а не в Google Fonts: у части людей Google Fonts не грузится, и вместо значков видны слова.
    icons.woff2 — только значки, которые есть в app.js. Новый значок — пересобрать файл (см. README) и поднять ?v=. */
-@font-face { font-family:'Material Symbols Rounded'; font-style:normal; font-weight:300 500; font-display:block; src:url(/fonts/icons.woff2?v=2) format('woff2'); }
+@font-face { font-family:'Material Symbols Rounded'; font-style:normal; font-weight:300 500; font-display:block; src:url(/fonts/icons.woff2?v=3) format('woff2'); }
 @font-face { font-family:'Manrope'; font-style:normal; font-weight:300 600; font-display:swap; src:url(/fonts/manrope-cyrillic.woff2) format('woff2'); unicode-range:U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116; }
 @font-face { font-family:'Manrope'; font-style:normal; font-weight:300 600; font-display:swap; src:url(/fonts/manrope-latin.woff2) format('woff2'); unicode-range:U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD; }
 body { margin:0; background:var(--bg); color:var(--text); font:15px/1.4 Manrope, -apple-system, "Segoe UI", Roboto, sans-serif; -webkit-font-smoothing:antialiased; }
@@ -189,9 +189,16 @@ h3 { margin:0; font-size:19px; font-weight:500; letter-spacing:-.02em; }
 .gardens button { flex:none; display:flex; align-items:center; gap:6px; border:0; background:var(--card); color:var(--muted); font-size:13px; font-weight:500; padding:8px 14px; border-radius:99px; cursor:pointer; }
 .gardens button .ms { font-size:17px; }
 .gardens button.on { background:var(--ink); color:var(--ink-text); }
-.sorts { display:flex; gap:6px; margin-top:-2px; }
-.sorts button { border:0; background:var(--card); color:var(--muted); font-size:13px; font-weight:500; padding:8px 14px; border-radius:99px; cursor:pointer; }
-.sorts button.on { background:var(--sage-soft); color:var(--sage-dark); }
+/* Заголовок «Мои цветы» и справа значок сортировки с выпадающим списком. */
+.head-row { display:flex; align-items:flex-end; justify-content:space-between; gap:12px; }
+.head-row .headline { flex:1; min-width:0; }
+.sort-wrap { position:relative; flex:none; margin-bottom:8px; }
+.sort-btn.on { background:var(--ink); color:var(--ink-text); }
+.menu { position:absolute; right:0; top:calc(100% + 6px); z-index:6; min-width:200px; background:var(--card); border-radius:18px; padding:6px; box-shadow:0 10px 30px rgba(20,30,20,.16), 0 0 0 1px var(--line); display:flex; flex-direction:column; }
+.menu button { display:flex; align-items:center; justify-content:space-between; gap:10px; border:0; background:none; color:var(--text); font-size:14.5px; padding:11px 12px; border-radius:12px; text-align:left; cursor:pointer; }
+.menu button.on { background:var(--soft); font-weight:500; }
+.menu button .ms { font-size:18px; color:var(--sage); }
+.dark .menu { box-shadow:0 10px 30px rgba(0,0,0,.5), 0 0 0 1px var(--line); }
 .loading.small { min-height:80px; }
 
 /* Полив с удобрением */

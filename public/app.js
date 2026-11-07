@@ -57,9 +57,11 @@ function app() {
   let pickDay = null;       // у какого цветка открыт выбор дня последнего полива
   const plantSlides = {};   // какое фото открыто в галерее карточки цветка: { id: номер }
   let done = null;          // экран «Готово»: { title, sub, text, photo, icon, plant, next: [экран, надпись] }
-  // Порядок в «Цветах»: 'new' — сначала новые, 'abc' — по алфавиту. Помним на телефоне.
+  // Порядок в «Цветах»: сначала новые, сначала старые или по алфавиту. Помним на телефоне.
+  const SORTS = [['new', 'Сначала новые'], ['old', 'Сначала старые'], ['abc', 'По алфавиту']];
   let plantSort = 'new';
-  try { if (localStorage.getItem('plantSort') === 'abc') plantSort = 'abc'; } catch (e) {}
+  try { const v = localStorage.getItem('plantSort'); if (SORTS.some((x) => x[0] === v)) plantSort = v; } catch (e) {}
+  let sortOpen = false;     // открыт список сортировки
   let fertJob = null;       // скан удобрения: { status: 'loading' | 'error', preview, started, stage, error, back: id удобрения, если его пересчитываем }
   let editVariety = null;   // где открыта правка сорта: 'scan' или id цветка
   let draft = { name: '', latin: '' }; // что набрано в полях сорта
@@ -199,6 +201,8 @@ function app() {
         plan.map((x) => '<button class="row hit grow" data-open="' + x.p.id + '">' + pic(x.p, 'thumb') + '<span class="txt"><b>' + esc(x.p.name) + '</b><small>' +
           esc([x.every ? x.amount : '', x.why || x.dose].filter(Boolean).join(' · ')) + '</small></span>' +
           chip(x.every ? 'раз в ' + x.every + ' дн.' : 'пока не надо', x.every ? 'lime' : 'gray') + '</button>').join('') + '</div></section>';
+    } else if (state.plants.length) {
+      h += '<section class="card empty-card"><p>График не разложился по цветам. Нажми «Пересчитать график» внизу, это займёт меньше минуты.</p></section>';
     } else {
       h += '<section class="card empty-card"><p>Цветов пока нет: добавь их через скан, и я составлю график.</p></section>';
     }
@@ -401,14 +405,14 @@ function app() {
   // ── Цветы ──
   function viewPlants() {
     // Цветы приходят в порядке добавления, от первых к последним.
-    const sorted = plantSort === 'abc'
-      ? state.plants.slice().sort((a, b) => a.name.localeCompare(b.name, 'ru', { sensitivity: 'base', numeric: true }))
-      : state.plants.slice().reverse();
-    let h = gardenSwitch() + headline(own() ? 'Мои цветы' : 'Цветы: ' + gardenName(), state.plants.length + ' ' + plural(state.plants.length, 'штука', 'штуки', 'штук'));
-    if (state.plants.length > 1) {
-      h += '<div class="sorts">' + [['new', 'Сначала новые'], ['abc', 'По алфавиту']].map((x) =>
-        '<button data-sort="' + x[0] + '" class="' + (x[0] === plantSort ? 'on' : '') + '">' + x[1] + '</button>').join('') + '</div>';
-    }
+    const sorted = plantSort === 'abc' ? state.plants.slice().sort((a, b) => a.name.localeCompare(b.name, 'ru', { sensitivity: 'base', numeric: true }))
+      : plantSort === 'old' ? state.plants.slice() : state.plants.slice().reverse();
+    const head = headline(own() ? 'Мои цветы' : 'Цветы: ' + gardenName(), state.plants.length + ' ' + plural(state.plants.length, 'штука', 'штуки', 'штук'));
+    // Сортировка — значок справа от заголовка, по нажатию выпадающий список.
+    let h = gardenSwitch() + (state.plants.length < 2 ? head : '<div class="head-row">' + head + '<div class="sort-wrap">' +
+      '<button class="circle sort-btn' + (sortOpen ? ' on' : '') + '" data-action="sort-open" aria-label="Сортировка" aria-expanded="' + sortOpen + '">' + ms('sort') + '</button>' +
+      (sortOpen ? '<div class="menu" role="menu">' + SORTS.map((x) => '<button role="menuitemradio" aria-checked="' + (x[0] === plantSort) + '" data-sort="' + x[0] + '" class="' + (x[0] === plantSort ? 'on' : '') + '"><span>' + x[1] + '</span>' + (x[0] === plantSort ? ms('check') : '') + '</button>').join('') + '</div>' : '') +
+      '</div></div>');
     h += '<div class="tiles">' + sorted.map((p) => {
       const w = when(p);
       const s = p.scan ? STATUS[p.scan.status] : null;
@@ -886,6 +890,8 @@ function app() {
   }
 
   root.addEventListener('click', async (e) => {
+    // Нажали мимо списка сортировки — закрываем его.
+    if (sortOpen && !e.target.closest('.sort-wrap')) { sortOpen = false; return render(); }
     const b = e.target.closest('button');
     if (!b) return;
     const d = b.dataset;
@@ -902,8 +908,10 @@ function app() {
       return render();
     }
     if (d.garden) return switchGarden(Number(d.garden));
+    if (d.action === 'sort-open') { sortOpen = !sortOpen; haptic(); return render(); }
     if (d.sort) {
-      plantSort = d.sort === 'abc' ? 'abc' : 'new';
+      plantSort = SORTS.some((x) => x[0] === d.sort) ? d.sort : 'new';
+      sortOpen = false;
       try { localStorage.setItem('plantSort', plantSort); } catch (e) {}
       haptic();
       return render();

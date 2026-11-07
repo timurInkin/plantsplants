@@ -10,10 +10,11 @@ const FORMS = ['жидкое', 'гранулы', 'палочки', 'порошо
 const fail = (message) => Object.assign(new Error(message), { status: 400 });
 
 function prompt(plants, others, month, photos) {
-  const list = plants.map((p) => {
+  // Цветы по номерам: длинные id модель иногда переписывает с ошибкой, и график не сходится с цветами.
+  const list = plants.map((p, i) => {
     const s = p.scan || {};
     const fert = p.feed?.fert && others[p.feed.fert];
-    return `- id ${p.id}: ${p.name}${s.latin ? ` (${s.latin})` : ''}; состояние: ${s.statusText || 'не сканировали'}` +
+    return `${i + 1}. ${p.name}${s.latin ? ` (${s.latin})` : ''}; состояние: ${s.statusText || 'не сканировали'}` +
       `; горшок: ${s.potText || (s.pot === 'small' ? 'тесный' : 'неизвестно')}; полив раз в ${p.every} дн.; удобрение сейчас: ${fert ? `«${fert}», раз в ${p.feed.every} дн.` : 'нет'}`;
   }).join('\n');
   return `Ты агроном и специалист по комнатным растениям. ${photos > 1 ? `На ${photos} фото одна и та же упаковка удобрения с разных сторон: читай их вместе.` : 'На фото упаковка удобрения для растений.'}
@@ -34,7 +35,7 @@ ${list || '(пока ни одного)'}
   "dose": "доза для полива по инструкции с упаковки, например «5 мл на 1 л воды»; если инструкции не видно, обычная для такого удобрения",
   "amount": "сколько готового раствора лить на одно растение, если это сказано в инструкции, например «40 мл на растение»; иначе пустая строка",
   "note": "главное правило применения, до 12 слов (например «только по влажному грунту, после обычного полива»)",
-  "plan": [{"plant": "id цветка из списка", "every_days": через сколько дней подкармливать сейчас, число; 0 — сейчас не подкармливать, "dose": "доза для этого цветка, если отличается от общей, иначе пустая строка", "amount": "сколько готового раствора вылить на этот цветок за раз, например «≈40 мл раствора» или «≈300 мл раствора»", "why": "почему так, до 10 слов"}]
+  "plan": [{"plant": номер цветка из списка, число, "every_days": через сколько дней подкармливать сейчас, число; 0 — сейчас не подкармливать, "dose": "доза для этого цветка, если отличается от общей, иначе пустая строка", "amount": "сколько готового раствора вылить на этот цветок за раз, например «≈40 мл раствора» или «≈300 мл раствора»", "why": "почему так, до 10 слов"}]
 }
 Правила:
 - Не выдумывай, что написано на упаковке. Если инструкции не видно, instructions_visible false, а dose и amount — обычные для такого вида удобрения, начни dose со слова «обычно».
@@ -62,9 +63,16 @@ export async function scanFertilizer(images, plants, others = {}, today = new Da
   for (const model of models) {
     try {
       const res = await step('удобрение: ' + model, chat(model, content, { maxTokens: 8000, json: true, effort: model === config.llmFastModel ? config.llmFastEffort : config.llmLookEffort }));
-      r = findJSON(res.text) || findJSON(res.reasoning);
-      if (r) break;
-      console.error('Удобрение: нет JSON от', model, String(res.text).slice(0, 500));
+      const got = findJSON(res.text) || findJSON(res.reasoning);
+      if (!got) { console.error('Удобрение: нет JSON от', model, String(res.text).slice(0, 500)); continue; }
+      // Цветы есть, а график ни с одним не сошёлся: такой ответ не берём, иначе у удобрения будет пустой график.
+      if (got.is_fertilizer !== false && plants.length && !normalizeFertilizer(got, plants).plan.length) {
+        console.error('Удобрение: график не сошёлся с цветами', model, JSON.stringify(got.plan).slice(0, 500));
+        lastError = Object.assign(new Error('Не получилось разложить график по цветам, попробуй ещё раз.'), { status: 502 });
+        continue;
+      }
+      r = got;
+      break;
     } catch (e) {
       lastError = e;
       console.error('Удобрение: модель не ответила', model, e.message);
@@ -75,12 +83,24 @@ export async function scanFertilizer(images, plants, others = {}, today = new Da
   return normalizeFertilizer(r, plants);
 }
 
+// Ссылка на цветок в графике: номер из списка (так просим), а на всякий случай ещё id или точное имя.
+function plantRef(x, plants, ids) {
+  const v = String(x.plant ?? x.n ?? x.number ?? x.id ?? x.plant_id ?? '').trim();
+  if (ids.has(v)) return v;
+  const n = Number(v.replace(/^(id|№|#)\s*/i, ''));
+  if (Number.isInteger(n) && n >= 1 && n <= plants.length) return plants[n - 1].id;
+  const name = String(x.name || v).trim().toLowerCase();
+  return plants.find((p) => String(p.name).toLowerCase() === name)?.id || null;
+}
+
 export function normalizeFertilizer(r, plants) {
   const ids = new Set(plants.map((p) => p.id));
   const seen = new Set();
-  const plan = (Array.isArray(r.plan) ? r.plan : []).filter((x) => x && ids.has(String(x.plant)) && !seen.has(String(x.plant)) && seen.add(String(x.plant)))
-    .map((x) => ({
-      plant: String(x.plant),
+  const plan = (Array.isArray(r.plan) ? r.plan : []).filter((x) => x && typeof x === 'object')
+    .map((x) => ({ x, id: plantRef(x, plants, ids) }))
+    .filter(({ id }) => id && !seen.has(id) && seen.add(id))
+    .map(({ x, id }) => ({
+      plant: id,
       every: Math.min(120, Math.max(0, Math.round(Number(x.every_days)) || 0)),
       dose: cut(x.dose, 60),
       amount: cut(x.amount, 60),
