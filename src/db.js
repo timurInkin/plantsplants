@@ -136,7 +136,7 @@ export async function waterAllDue(uid, day, mode = 'all') {
 }
 
 // ───── удобрения и подкормка ─────
-// У цветка в plants.feed: { fert: id удобрения, every: раз во сколько дней (0 — пауза), dose, why, last: день последней подкормки, prev }.
+// У цветка в plants.feed: { fert: id удобрения, every: раз во сколько дней (0 — пауза), dose, amount: сколько раствора вылить, why, last: день последней подкормки, prev }.
 // Подкормка идёт вместе с поливом: цветок попадает в «Полив с удобрением», когда пора поливать и с прошлой подкормки прошло every дней.
 
 const newFertId = () => 'f' + Date.now().toString(36) + crypto.randomBytes(2).toString('hex');
@@ -153,13 +153,22 @@ export async function getFertilizer(uid, id) {
   return check(await supabase.from('fertilizers').select('*').eq('user_id', uid).eq('id', id).maybeSingle());
 }
 
+// Фото упаковки: первое в photo_path, доснятые стороны — в info.photos.
+export const MAX_FERT_PHOTOS = 4;
+export const fertPhotoPaths = (row) => [row.photo_path, ...(row.info?.photos || [])].filter(Boolean);
+
+async function uploadFertPhoto(uid, id, bytes) {
+  const path = `${uid}/${id}-${Date.now().toString(36)}${crypto.randomBytes(2).toString('hex')}.jpg`;
+  const { error } = await photos().upload(path, bytes, { contentType: 'image/jpeg', upsert: true });
+  return error ? null : path;
+}
+
 export async function saveFertilizer(uid, fert, bytes) {
   const id = newFertId();
-  const path = `${uid}/${id}-${Date.now().toString(36)}.jpg`;
-  const { error } = await photos().upload(path, bytes, { contentType: 'image/jpeg', upsert: true });
+  const path = await uploadFertPhoto(uid, id, bytes);
   const { name, ...info } = fert;
   return check(await supabase.from('fertilizers')
-    .insert({ id, user_id: uid, name, info: { ...info, applied: false }, photo_path: error ? null : path }).select().single());
+    .insert({ id, user_id: uid, name, info: { ...info, applied: false }, photo_path: path }).select().single());
 }
 
 // Поставить в график: каждому цветку из плана — это удобрение, как часто и сколько. Прошлую подкормку помним.
@@ -170,11 +179,21 @@ export async function applyFertilizer(uid, fert) {
     const x = plan.get(p.id);
     // Пауза для цветка, у которого уже есть другое удобрение, его не сбивает.
     if (x && x.every === 0 && p.feed?.fert && p.feed.fert !== fert.id) return null;
-    const feed = x ? { fert: fert.id, every: x.every, dose: x.dose || fert.info.dose || '', why: x.why || '', last: p.feed?.last || null } : null;
+    const feed = x ? { fert: fert.id, every: x.every, dose: x.dose || fert.info.dose || '', amount: x.amount || fert.info.amount || '', why: x.why || '', last: p.feed?.last || null } : null;
     return updatePlant(uid, p.id, { feed });
   }).filter(Boolean);
   await Promise.all([...changes, supabase.from('fertilizers').update({ info: { ...fert.info, applied: true } }).eq('id', fert.id).then(check)]);
   return changes.length;
+}
+
+// Новый разбор того же удобрения: план меняется, а в график он попадёт, только когда человек снова нажмёт «Поставить в график».
+// bytes — доснятая сторона упаковки: добавляется к фото этого удобрения.
+export async function updateFertilizer(uid, row, fert, bytes = null) {
+  const added = bytes ? await uploadFertPhoto(uid, row.id, bytes) : null;
+  const paths = [...fertPhotoPaths(row), added].filter(Boolean);
+  const { name, ...info } = fert;
+  check(await supabase.from('fertilizers')
+    .update({ name, photo_path: paths[0] || null, info: { ...info, photos: paths.slice(1), applied: false } }).eq('user_id', uid).eq('id', row.id));
 }
 
 export async function deleteFertilizer(uid, fert) {
@@ -182,7 +201,7 @@ export async function deleteFertilizer(uid, fert) {
   check(await supabase.from('fertilizers').delete().eq('user_id', uid).eq('id', fert.id));
   await Promise.all([
     ...plants.map((p) => updatePlant(uid, p.id, { feed: null })),
-    fert.photo_path ? photos().remove([fert.photo_path]) : null,
+    fertPhotoPaths(fert).length ? photos().remove(fertPhotoPaths(fert)) : null,
   ]);
 }
 
@@ -215,7 +234,7 @@ export async function buildState(uid) {
   return {
     today,
     fertilizers: ferts.map((f) => ({
-      id: f.id, name: f.name, ...f.info, photo: f.photo_path ? photoUrl(f.photo_path) : null,
+      id: f.id, name: f.name, ...f.info, photo: f.photo_path ? photoUrl(f.photo_path) : null, photos: fertPhotoPaths(f).map(photoUrl),
       count: plants.filter((p) => p.feed?.fert === f.id && p.feed.every > 0).length,
     })),
     plants: plants.map((p) => {
@@ -224,7 +243,7 @@ export async function buildState(uid) {
       const f = p.feed && fertName[p.feed.fert] ? p.feed : null;
       const since = f?.last ? daysBetween(f.last, today) : null;
       const feed = f && {
-        fert: f.fert, name: fertName[f.fert], every: f.every, dose: f.dose || '', why: f.why || '', last: f.last || null,
+        fert: f.fert, name: fertName[f.fert], every: f.every, dose: f.dose || '', amount: f.amount || '', why: f.why || '', last: f.last || null,
         fedToday: f.last === today,
         due: f.every > 0 && f.last !== today && (since === null || since >= f.every),
         nextIn: f.every > 0 ? (since === null ? 0 : Math.max(0, f.every - since)) : null,

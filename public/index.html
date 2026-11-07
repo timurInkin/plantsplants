@@ -33,11 +33,13 @@ main { padding:8px 16px 40px; max-width:560px; margin:0 auto; display:flex; flex
 html:not(.icons) .ms { color:transparent !important; }
 
 .tabs { position:sticky; top:0; z-index:5; display:flex; gap:4px; margin:0 auto; max-width:560px; padding:12px 16px 10px; background:var(--bg); }
-.tabs button { flex:1; display:flex; align-items:center; justify-content:center; gap:6px; border:0; background:var(--card); color:var(--muted); font-size:13.5px; font-weight:500; padding:10px 0; border-radius:99px; cursor:pointer; }
+.tabs button { flex:1 1 auto; display:flex; align-items:center; justify-content:center; gap:5px; border:0; background:var(--card); color:var(--muted); font-size:13.5px; font-weight:500; padding:10px 8px; border-radius:99px; cursor:pointer; white-space:nowrap; }
 .tabs button .ms { font-size:18px; }
 .tabs button.on { background:var(--sage); color:#fff; }
 .tabs .theme-btn { flex:none; width:40px; padding:0; }
 .tabs .theme-btn .ms { font-size:19px; }
+/* Четыре вкладки на узком телефоне: без значка у «Скан» и чуть мельче. */
+@media (max-width:389px) { .tabs { gap:3px; padding-left:12px; padding-right:12px; } .tabs button { font-size:13px; padding:10px 6px; } .tabs button:not(.theme-btn) .ms { display:none; } .tabs .theme-btn { width:38px; } }
 
 .headline { padding:14px 4px 4px; }
 .label { margin:0 0 10px; font-size:13px; color:var(--muted); }
@@ -187,6 +189,9 @@ h3 { margin:0; font-size:19px; font-weight:500; letter-spacing:-.02em; }
 .gardens button { flex:none; display:flex; align-items:center; gap:6px; border:0; background:var(--card); color:var(--muted); font-size:13px; font-weight:500; padding:8px 14px; border-radius:99px; cursor:pointer; }
 .gardens button .ms { font-size:17px; }
 .gardens button.on { background:var(--ink); color:var(--ink-text); }
+.sorts { display:flex; gap:6px; margin-top:-2px; }
+.sorts button { border:0; background:var(--card); color:var(--muted); font-size:13px; font-weight:500; padding:8px 14px; border-radius:99px; cursor:pointer; }
+.sorts button.on { background:var(--sage-soft); color:var(--sage-dark); }
 .loading.small { min-height:80px; }
 
 /* Полив с удобрением */
@@ -197,6 +202,15 @@ h3 { margin:0; font-size:19px; font-weight:500; letter-spacing:-.02em; }
 .card.feed .pill { margin-top:10px; }
 .feed-why { margin:10px 4px 0; font-size:13px; color:var(--muted); }
 .link-row + .feed-why { margin:-6px 0 14px; }
+.feed-facts { gap:10px; }
+.feed-facts li { font-size:14px; }
+.feed-facts .ms { width:28px; height:28px; font-size:17px; border-radius:9px; }
+.feed-facts + .feed-why { margin:12px 4px 14px; }
+.feed-facts + .stepper, .feed-facts + .hint { margin-top:14px; }
+.feed-mix { margin:8px 0 0; font-size:13.5px; color:var(--text); }
+.feed-mix b { font-weight:500; color:var(--text); }
+.hint.warm { background:var(--warm); color:var(--warm-text); }
+.facts + .hint { margin-top:14px; }
 
 /* Сорт вручную */
 .edit-name { align-self:flex-start; display:inline-flex; align-items:center; gap:5px; margin:-8px 4px 0; padding:4px 0; border:0; background:none; color:var(--sage-dark); font-size:13.5px; font-weight:500; cursor:pointer; }

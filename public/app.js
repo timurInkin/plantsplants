@@ -39,7 +39,7 @@ function app() {
   } catch (e) { iconsReady(); }
   const MONTHS = ['января', 'февраля', 'марта', 'апреля', 'мая', 'июня', 'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря'];
   const DAYS = ['Воскресенье', 'Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница', 'Суббота'];
-  const TABS = [['today', 'Сегодня'], ['plants', 'Цветы'], ['scan', 'Скан']];
+  const TABS = [['today', 'Сегодня'], ['plants', 'Цветы'], ['ferts', 'Удобрения'], ['scan', 'Скан']];
   const STATUS = { ok: ['всё ок', 'sage', 'check_circle'], watch: ['присмотреться', 'lime', ''], help: ['подлечить', 'warm', 'healing'] };
   const POT = { ok: ['горшок норм', 'sage'], small: ['тесный горшок', 'warm'], big: ['горшок великоват', 'lime'] };
 
@@ -47,7 +47,7 @@ function app() {
   // Экран берём из адреса (#today, #plant/<id>, #g=<id>/today). Telegram может дописать к нему свои параметры
   // (#tgWebAppData=…), например когда приложение открыто кнопкой «Открыть» в профиле бота: их отбрасываем.
   let route = (location.hash || '').slice(1).split(/[?&]/)[0];
-  if (!/^(today|plants|scan|share|plant\/[\w-]+|fert\/[\w-]+|g=\d+(\/.*)?)$/.test(route)) route = 'today';
+  if (!/^(today|plants|ferts|scan|share|plant\/[\w-]+|fert\/[\w-]+|g=\d+(\/.*)?)$/.test(route)) route = 'today';
   // Чьи цветы на экране: null — свои, число — того, кто ими поделился. Ссылка из бота может открыть сразу их: #g=<id>/today
   let garden = null;
   const gm = route.match(/^g=(\d+)\/?(.*)$/);
@@ -57,7 +57,10 @@ function app() {
   let pickDay = null;       // у какого цветка открыт выбор дня последнего полива
   const plantSlides = {};   // какое фото открыто в галерее карточки цветка: { id: номер }
   let done = null;          // экран «Готово»: { title, sub, text, photo, icon, plant, next: [экран, надпись] }
-  let fertJob = null;       // скан удобрения: { status: 'loading' | 'error', preview, started, stage, error }
+  // Порядок в «Цветах»: 'new' — сначала новые, 'abc' — по алфавиту. Помним на телефоне.
+  let plantSort = 'new';
+  try { if (localStorage.getItem('plantSort') === 'abc') plantSort = 'abc'; } catch (e) {}
+  let fertJob = null;       // скан удобрения: { status: 'loading' | 'error', preview, started, stage, error, back: id удобрения, если его пересчитываем }
   let editVariety = null;   // где открыта правка сорта: 'scan' или id цветка
   let draft = { name: '', latin: '' }; // что набрано в полях сорта
   let busy = false;
@@ -138,12 +141,15 @@ function app() {
       '<span class="txt"><b>' + esc(p.name) + '</b><small>раз в ' + days(p.every) + '</small></span>' + chip(w[0], w[1]) + '</button></div>';
   }
 
-  function feedRow(p) {
+  // mix — у всех цветов в плашке одно удобрение и одна доза: они написаны над строками, а в строке только сколько вылить.
+  function feedRow(p, mix) {
     const f = p.feed;
+    const pour = f.amount ? 'вылить ' + f.amount : '';
+    const what = '«' + f.name + '»' + (f.dose ? ', ' + f.dose : '');
     return '<div class="row' + (f.fedToday ? ' done' : '') + '">' +
       '<button class="hit" data-feed-water="' + p.id + '">' + check(f.fedToday) + '</button>' +
       '<button class="hit grow" data-open="' + p.id + '">' + pic(p, 'thumb') +
-      '<span class="txt"><b>' + esc(p.name) + '</b><small>«' + esc(f.name) + '»' + (f.dose ? ', ' + esc(f.dose) : '') + '</small></span></button></div>';
+      '<span class="txt"><b>' + esc(p.name) + '</b><small>' + esc(mix ? pour || f.dose : [pour, what].filter(Boolean).join(' · ')) + '</small></span></button></div>';
   }
 
   // Подкормка в карточке цветка: чем, как часто, когда следующая.
@@ -154,7 +160,8 @@ function app() {
       : f.due ? (dueToday ? 'сегодня, вместе с поливом' : 'со следующим поливом') : 'следующая примерно через ' + days(f.nextIn);
     let h = '<section class="card"><div class="card-head"><div><h3>Подкормка</h3><p>' + when + '</p></div>' +
       ((f.due && dueToday) || f.fedToday ? '<button class="water-btn' + (f.fedToday ? ' on' : '') + '" data-feed-water="' + p.id + '">' + ms('compost') + (f.fedToday ? 'Готово' : 'Подкормила') + '</button>' : '') + '</div>' +
-      '<button class="link-row" data-fert="' + f.fert + '">' + ms('compost') + '<span>«' + esc(f.name) + '»' + (f.dose ? ', ' + esc(f.dose) : '') + '</span><b>удобрение</b></button>';
+      '<button class="link-row" data-fert="' + f.fert + '">' + ms('compost') + '<span>«' + esc(f.name) + '»</span><b>удобрение</b></button>';
+    if (f.dose || f.amount) h += '<ul class="facts feed-facts">' + (f.dose ? fact('water_drop', 'развести: ' + f.dose) : '') + (f.amount ? fact('potted_plant', 'вылить: ' + f.amount) : '') + '</ul>';
     if (f.why) h += '<p class="feed-why">' + esc(f.why) + '</p>';
     if (own()) {
       h += f.every > 0
@@ -167,25 +174,57 @@ function app() {
   }
 
   // ── Удобрение ──
+  const MAX_FERT_PHOTOS = 4;
   function viewFert(id) {
     if (id === 'new' || id === 'pending') return viewFertJob(id);
     const f = (state.fertilizers || []).find((x) => x.id === id);
-    if (!f) return viewPlants();
-    let h = '<div class="topbar"><button class="circle" data-go="plants">' + ms('arrow_back') + '</button></div>';
+    if (!f) return viewFerts();
+    const photos = f.photos && f.photos.length ? f.photos : f.photo ? [f.photo] : [];
+    const more = own() && photos.length < MAX_FERT_PHOTOS;
+    let h = '<div class="topbar"><button class="circle" data-go="ferts">' + ms('arrow_back') + '</button></div>';
+    // Стороны упаковки листаются вбок, как доснятые фото цветка.
+    h += photos.length > 1 ? gallery('fert:' + f.id, photos, Math.min(plantSlides['fert:' + f.id] || 0, photos.length - 1)) : '<section class="hero-photo">' + pic(f, 'photo') + '</section>';
     // «для орхидей» под «Агрикола для орхидей» не повторяем.
-    h += '<section class="hero-photo">' + pic(f, 'photo') + '</section>' + headline(f.name, f.kind && !f.name.toLowerCase().includes(f.kind.toLowerCase()) ? f.kind : '');
-    const facts = (f.dose ? fact('water_drop', f.dose) : '') + (f.npk || f.form ? fact('science', [f.npk ? 'NPK ' + f.npk : '', f.form].filter(Boolean).join(', ')) : '') + (f.note ? fact('lightbulb', f.note) : '');
-    if (facts) h += '<section class="card"><ul class="facts">' + facts + '</ul></section>';
+    h += headline(f.name, f.kind && !f.name.toLowerCase().includes(f.kind.toLowerCase()) ? f.kind : '');
+    const facts = (f.dose ? fact('water_drop', 'развести: ' + f.dose) : '') + (f.amount ? fact('potted_plant', 'вылить: ' + f.amount) : '') +
+      (f.npk || f.form ? fact('science', [f.npk ? 'NPK ' + f.npk : '', f.form].filter(Boolean).join(', ')) : '') + (f.note ? fact('lightbulb', f.note) : '');
+    // Инструкции на фото не видно: доза примерная, просим сфоткать сторону, где она написана.
+    const guess = f.guessed ? (more
+      ? '<button class="hint warm" data-action="fert-more" data-id="' + f.id + '">' + ms('add_a_photo') + 'Инструкции на фото не видно, доза примерная. Сфоткай сторону, где она написана</button>'
+      : '<p class="feed-why">Инструкции на фото не видно, доза примерная.</p>') : '';
+    if (facts || guess) h += '<section class="card">' + (facts ? '<ul class="facts">' + facts + '</ul>' : '') + guess + '</section>';
     const plan = (f.plan || []).map((x) => ({ ...x, p: byId(x.plant) })).filter((x) => x.p).sort((a, b) => (b.every > 0) - (a.every > 0));
     if (plan.length) {
       h += '<section class="card"><div class="card-head"><div><h3>График подкормки</h3><p>' + (f.applied ? 'уже в графике' : 'с учётом сезона и того, как дела у цветов') + '</p></div></div><div class="rows">' +
-        plan.map((x) => '<button class="row hit grow" data-open="' + x.p.id + '">' + pic(x.p, 'thumb') + '<span class="txt"><b>' + esc(x.p.name) + '</b><small>' + esc(x.why || x.dose) + '</small></span>' +
+        plan.map((x) => '<button class="row hit grow" data-open="' + x.p.id + '">' + pic(x.p, 'thumb') + '<span class="txt"><b>' + esc(x.p.name) + '</b><small>' +
+          esc([x.every ? x.amount : '', x.why || x.dose].filter(Boolean).join(' · ')) + '</small></span>' +
           chip(x.every ? 'раз в ' + x.every + ' дн.' : 'пока не надо', x.every ? 'lime' : 'gray') + '</button>').join('') + '</div></section>';
     } else {
       h += '<section class="card empty-card"><p>Цветов пока нет: добавь их через скан, и я составлю график.</p></section>';
     }
     if (own() && !f.applied && plan.length) h += '<button class="pill" data-action="fert-apply" data-id="' + f.id + '"><span>Поставить в график</span><i>' + ms('check') + '</i></button>';
-    if (own()) h += '<button class="link-btn" data-action="fert-delete" data-id="' + f.id + '">' + ms('delete') + 'Удалить удобрение</button>';
+    if (own()) {
+      if (more && !f.guessed) h += '<button class="link-btn" data-action="fert-more" data-id="' + f.id + '">' + ms('add_a_photo') + 'Доснять другую сторону упаковки</button>';
+      if (photos.length) h += '<button class="link-btn" data-action="fert-rescan" data-id="' + f.id + '">' + ms('auto_awesome') + 'Пересчитать график</button>';
+      h += '<button class="link-btn" data-action="fert-delete" data-id="' + f.id + '">' + ms('delete') + 'Удалить удобрение</button>';
+    }
+    return h;
+  }
+
+  // ── Удобрения ──
+  function viewFerts() {
+    const ferts = state.fertilizers || [];
+    let h = gardenSwitch() + headline('Удобрения', ferts.length ? ferts.length + ' ' + plural(ferts.length, 'штука', 'штуки', 'штук') : 'пока ни одного');
+    if (!ferts.length) {
+      return h + (own()
+        ? '<button class="card scan-cta" data-action="fert-shoot"><span class="circle">' + ms('compost') + '</span><span class="txt"><b>Сфоткать удобрение</b><small>прочитаю упаковку и составлю график подкормки</small></span>' + ms('chevron_right') + '</button>'
+        : '<section class="card empty-card"><p>Удобрений пока нет.</p></section>');
+    }
+    h += '<div class="tiles">' + ferts.map((f) => {
+      const c = !f.applied ? ['не в графике', 'warm', ''] : f.count ? ['у ' + f.count + ' ' + plural(f.count, 'цветка', 'цветов', 'цветов'), 'lime', 'compost'] : ['пока пауза', 'gray', ''];
+      return '<button class="tile" data-fert="' + f.id + '">' + pic(f, 'pic') + '<span class="tile-body"><b>' + esc(f.name) + '</b>' + chip(c[0], c[1], c[2]) + '</span></button>';
+    }).join('') +
+      (own() ? '<button class="tile add" data-action="fert-shoot"><span class="pic">' + ms('add_a_photo') + '</span><span class="tile-body"><b>Добавить</b><small>сфоткать упаковку</small></span></button>' : '') + '</div>';
     return h;
   }
 
@@ -196,7 +235,7 @@ function app() {
       '<section class="hero-photo">' + (j.preview ? '<span class="photo"><img src="' + j.preview + '" alt=""></span>' : '<span class="photo empty">' + ms('compost') + '</span>') +
       (j.status === 'loading' ? '<span class="scanning"><i></i></span>' : '') + '</section>';
     if (j.status === 'error') return h + headline('Не получилось', j.error) + '<button class="pill" data-action="fert-shoot"><span>Сфоткать ещё раз</span><i>' + ms('photo_camera') + '</i></button>';
-    return h + headline('Читаю упаковку…', 'и составляю график под твои цветы, обычно меньше минуты') +
+    return h + headline(j.back ? 'Перечитываю упаковку…' : 'Читаю упаковку…', 'и составляю график под твои цветы, обычно меньше минуты') +
       '<p class="wait-line"><b id="elapsed">' + clock(j.started) + '</b><span>' + esc(j.stage || 'Смотрю, что это за удобрение…') + '</span></p>';
   }
 
@@ -336,9 +375,12 @@ function app() {
     }
 
     if (feedDue.length) {
+      // Одно удобрение и одна доза у всех: пишем их один раз, а в строках — сколько вылить на каждый цветок.
+      const mix = new Set(feedDue.map((p) => p.feed.fert + '|' + p.feed.dose)).size === 1 ? feedDue[0].feed : null;
       h += '<section class="card feed"><div class="tag-row"><span class="tag">' + ms('compost') + 'Полив с удобрением</span><small>' +
         (feedLeft ? 'разведи удобрение в воде для полива' : 'на сегодня всё') + '</small></div>' +
-        '<div class="rows">' + feedDue.map(feedRow).join('') + '</div>' +
+        (mix && feedLeft ? '<p class="feed-mix"><b>«' + esc(mix.name) + '»</b>' + (mix.dose ? ' ' + esc(mix.dose) : '') + '</p>' : '') +
+        '<div class="rows">' + feedDue.map((p) => feedRow(p, !!mix && feedLeft)).join('') + '</div>' +
         (feedLeft > 1 ? '<button class="pill" data-action="water-all" data-mode="feed"><span>Полила всех с удобрением</span><i>' + ms('done_all') + '</i></button>' : '') + '</section>';
     }
 
@@ -358,8 +400,15 @@ function app() {
 
   // ── Цветы ──
   function viewPlants() {
-    const sorted = state.plants.slice().sort((a, b) => a.dueIn - b.dueIn);
+    // Цветы приходят в порядке добавления, от первых к последним.
+    const sorted = plantSort === 'abc'
+      ? state.plants.slice().sort((a, b) => a.name.localeCompare(b.name, 'ru', { sensitivity: 'base', numeric: true }))
+      : state.plants.slice().reverse();
     let h = gardenSwitch() + headline(own() ? 'Мои цветы' : 'Цветы: ' + gardenName(), state.plants.length + ' ' + plural(state.plants.length, 'штука', 'штуки', 'штук'));
+    if (state.plants.length > 1) {
+      h += '<div class="sorts">' + [['new', 'Сначала новые'], ['abc', 'По алфавиту']].map((x) =>
+        '<button data-sort="' + x[0] + '" class="' + (x[0] === plantSort ? 'on' : '') + '">' + x[1] + '</button>').join('') + '</div>';
+    }
     h += '<div class="tiles">' + sorted.map((p) => {
       const w = when(p);
       const s = p.scan ? STATUS[p.scan.status] : null;
@@ -369,13 +418,6 @@ function app() {
     }).join('') +
       (own() ? '<button class="tile add" data-go="scan"><span class="pic">' + ms('add_a_photo') + '</span><span class="tile-body"><b>Добавить</b><small>через скан</small></span></button>' : '') + '</div>';
     if (own()) {
-      const ferts = state.fertilizers || [];
-      h += ferts.length
-        ? '<section class="card"><div class="card-head"><div><h3>Удобрения</h3><p>подкормка по графику</p></div></div><div class="rows">' +
-          ferts.map((f) => '<button class="row hit grow" data-fert="' + f.id + '">' + pic(f, 'thumb') + '<span class="txt"><b>' + esc(f.name) + '</b><small>' +
-            (!f.applied ? 'не в графике' : f.count ? 'в графике у ' + f.count + ' ' + plural(f.count, 'цветка', 'цветов', 'цветов') : 'сейчас без подкормки') + '</small></span>' + ms('chevron_right') + '</button>').join('') +
-          '</div><button class="link-btn" data-action="fert-shoot">' + ms('add_a_photo') + 'Сфоткать ещё одно</button></section>'
-        : '<button class="card scan-cta" data-action="fert-shoot"><span class="circle">' + ms('compost') + '</span><span class="txt"><b>Удобрения</b><small>сфоткай упаковку, составлю график подкормки</small></span>' + ms('chevron_right') + '</button>';
       h += '<button class="card scan-cta" data-action="share-open"><span class="circle">' + ms('group_add') + '</span><span class="txt"><b>Поделиться цветами</b><small>с тем, кто присмотрит, пока тебя нет</small></span>' + ms('chevron_right') + '</button>';
     }
     return h;
@@ -560,10 +602,11 @@ function app() {
       root.innerHTML = '<div class="loading">' + (error ? esc(error) : '<span class="spinner"></span>') + '</div>';
       return;
     }
-    const tab = route === 'fert/new' || route === 'fert/pending' ? 'scan' : route.startsWith('plant/') || route.startsWith('fert/') || route === 'share' || route === 'done' ? 'plants' : route;
+    const tab = route === 'ferts' || route.startsWith('fert/') ? 'ferts' : route === 'done' ? (done && done.tab) || 'plants' : route.startsWith('plant/') || route === 'share' ? 'plants' : route;
     let view;
     if (route.startsWith('plant/')) view = viewPlant(route.slice(6));
     else if (route === 'plants') view = viewPlants();
+    else if (route === 'ferts') view = viewFerts();
     else if (route === 'scan') view = viewScan();
     else if (route === 'share') view = viewShare();
     else if (route === 'done') view = viewDone();
@@ -689,7 +732,7 @@ function app() {
     state = null; render();
     return api('/api/state').then((s) => {
       state = s;
-      go(next || (route.startsWith('plant/') || route === 'share' ? 'plants' : route));
+      go(next || (route.startsWith('plant/') || route === 'share' ? 'plants' : route.startsWith('fert/') ? 'ferts' : route));
     }).catch((e) => { if (garden) { garden = null; reload(); } else render(e.message); });
   }
 
@@ -785,10 +828,11 @@ function app() {
   }
 
   // Скан удобрения: удобрение сохраняется сразу, потом открываем его экран с графиком.
-  async function runFert(start, preview) {
+  // back — id удобрения, которое пересчитываем (с доснятой стороной или без): если не выйдет, оно остаётся как было.
+  async function runFert(start, preview, back) {
     const seq = ++scanSeq;
     const isCurrent = () => seq === scanSeq;
-    fertJob = { status: 'loading', preview, started: Date.now() };
+    fertJob = { status: 'loading', preview, started: Date.now(), back: back || null };
     go('fert/new');
     try {
       const { job } = await start();
@@ -796,23 +840,34 @@ function app() {
       if (!r || !isCurrent()) return;
       setState(await api('/api/state'));
       fertJob = null;
-      success();
+      plantSlides['fert:' + r.fert.id] = 0;
+      success(back ? 'График обновила' : undefined);
       go('fert/' + r.fert.id);
     } catch (e) {
       if (!isCurrent()) return;
+      if (back) {
+        fertJob = null;
+        go('fert/' + back);
+        return alert('Не получилось: ' + e.message + ' Удобрение осталось как было.');
+      }
       fertJob = { ...(fertJob || {}), status: 'error', error: e.message };
       if (route === 'fert/new') render();
     }
   }
 
   let scanFert = false;     // следующее фото — упаковка удобрения
+  let fertMore = null;      // …и это другая сторона уже сохранённого удобрения (его id)
   camera.addEventListener('change', async () => {
     const file = camera.files[0];
     camera.value = '';
     if (!file) return;
     let img;
     try { img = await shrink(file); } catch (e) { return alert(e.message); }
-    if (scanFert) { scanFert = false; return runFert(() => api('/api/fert/scan', img.blob, true), img.preview); }
+    if (scanFert) {
+      const id = fertMore;
+      scanFert = false; fertMore = null;
+      return runFert(() => api('/api/fert/scan' + (id ? '?fert=' + encodeURIComponent(id) : ''), img.blob, true), img.preview, id);
+    }
     // Сверху всегда фото, которое только что сняли. Прошлый результат помним: если досъёмка не удастся, вернём его.
     const keep = scanMore && scan && scan.result ? scan : null;
     const plant = scanDetail && byId(scanTarget);
@@ -823,7 +878,7 @@ function app() {
   });
 
   function shoot(target, more, detail) {
-    scanFert = false;
+    scanFert = false; fertMore = null;
     scanTarget = target || null;
     scanMore = !!more;
     scanDetail = !!detail && !more;
@@ -847,6 +902,12 @@ function app() {
       return render();
     }
     if (d.garden) return switchGarden(Number(d.garden));
+    if (d.sort) {
+      plantSort = d.sort === 'abc' ? 'abc' : 'new';
+      try { localStorage.setItem('plantSort', plantSort); } catch (e) {}
+      haptic();
+      return render();
+    }
     if (d.water) return water(d.water);
     if (d.feedWater) return water(d.feedWater, true);
     if (d.fert) return go('fert/' + d.fert);
@@ -958,15 +1019,20 @@ function app() {
     }
 
     // Удобрения.
-    if (d.action === 'fert-shoot') { scanFert = true; return camera.click(); }
-    if (d.action === 'fert-cancel') { fertJob = null; scanSeq++; return go('scan'); }
+    if (d.action === 'fert-shoot') { scanFert = true; fertMore = null; return camera.click(); }
+    if (d.action === 'fert-more') { scanFert = true; fertMore = d.id; return camera.click(); }
+    if (d.action === 'fert-rescan') {
+      const f = state.fertilizers.find((x) => x.id === d.id);
+      return f && runFert(() => api('/api/fert/rescan', { fert: f.id }), f.photo, f.id);
+    }
+    if (d.action === 'fert-cancel') { const back = fertJob && fertJob.back; fertJob = null; scanSeq++; return go(back ? 'fert/' + back : 'ferts'); }
     if (d.action === 'fert-from-scan') { const preview = scan && scan.preview; scan = null; return runFert(() => api('/api/fert/scan?from=pending', {}), preview); }
     if (d.action === 'fert-apply') {
       const f = state.fertilizers.find((x) => x.id === d.id);
       if (!f || !(await act(() => api('/api/fert/apply', { fert: f.id }), b))) return;
       const n = (f.plan || []).filter((x) => x.every > 0 && byId(x.plant)).length;
       done = {
-        title: 'Поставила в график', sub: f.name, photo: f.photo, icon: 'compost', next: ['today', 'Открыть «Сегодня»'],
+        title: 'Поставила в график', sub: f.name, photo: f.photo, icon: 'compost', next: ['today', 'Открыть «Сегодня»'], tab: 'ferts',
         text: n ? 'Подкормка у ' + n + ' ' + plural(n, 'цветка', 'цветов', 'цветов') + '. Когда будет пора, они появятся на «Сегодня» в плашке «Полив с удобрением».'
           : 'Сейчас никого подкармливать не надо. Напомню, когда будет пора.',
       };
@@ -978,7 +1044,7 @@ function app() {
       if (!f || !confirm('Удалить «' + f.name + '»? Подкормка этим удобрением пропадёт из графика.')) return;
       if (!(await act(() => api('/api/fert/delete', { fert: f.id }), b))) return;
       success('Удобрение удалила');
-      return go('plants');
+      return go('ferts');
     }
 
     // Сорт вручную.

@@ -89,11 +89,13 @@ async function api(uid, path, req) {
     return startScanJob(uid, 'скан из приложения', (onStage) => scanForUser(uid, bytes, '', more, false, onStage, plant));
   }
   // Скан удобрения: новое фото или фото последнего скана (?from=pending), если сканер цветов увидел на нём удобрение.
+  // ?fert=<id> — доснятая сторона упаковки уже сохранённого удобрения: разбор по всем его фото вместе.
   if (path === '/api/fert/scan') {
-    const fromPending = new URL(req.url, 'http://x').searchParams.get('from') === 'pending';
+    const q = new URL(req.url, 'http://x').searchParams;
+    const fromPending = q.get('from') === 'pending', fertId = q.get('fert') || null;
     const bytes = fromPending ? null : await readBody(req, 4_000_000);
     if (!fromPending && !bytes.length) throw new Error('Пустое фото');
-    return startScanJob(uid, 'скан удобрения', (onStage) => fertForUser(uid, bytes, onStage), (r) => ({ fert: { id: r.fert.id } }));
+    return startScanJob(uid, fertId ? 'досъёмка удобрения' : 'скан удобрения', (onStage) => fertForUser(uid, bytes, onStage, fertId), (r) => ({ fert: { id: r.fert.id } }));
   }
   if (path === '/api/scan/undo') {
     const r = await db.undoPending(uid);
@@ -129,6 +131,12 @@ async function api(uid, path, req) {
   if (path === '/api/water-all') {
     await db.waterAllDue(g, today, ['plain', 'feed'].includes(body.mode) ? body.mode : 'all');
     return db.buildState(g);
+  }
+
+  // Пересчитать удобрение по его фото: например, чтобы появилось, сколько лить, или весной под новый сезон.
+  if (path === '/api/fert/rescan') {
+    if (!body.fert) throw fail('Нет такого удобрения');
+    return startScanJob(uid, 'пересчёт удобрения', (onStage) => fertForUser(uid, null, onStage, String(body.fert)), (r) => ({ fert: { id: r.fert.id } }));
   }
 
   // Удобрение: поставить в график (раздать цветам по плану) или удалить.

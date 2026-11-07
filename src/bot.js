@@ -6,7 +6,7 @@ import { todayLocal, addDays, dayLabel, dayShort, validDay } from './dates.js';
 import {
   touchUser, getUser, getPlants, getPlant, uploadPending, setPending, undoPending, pendingImages, savePending, sameKind, downloadPhoto,
   waterAllDue, setLastWatering, buildState, acceptInvite, gardensOf, MAX_SCAN_PHOTOS, logScan, updateUser,
-  getFertilizers, saveFertilizer,
+  getFertilizers, saveFertilizer, getFertilizer, updateFertilizer, fertPhotoPaths, MAX_FERT_PHOTOS,
 } from './db.js';
 import { scanFertilizer } from './fert.js';
 import { currentRun } from './timing.js';
@@ -53,8 +53,23 @@ export async function recheckForUser(uid, { plant: plantId, name, latin }, onSta
 
 // Скан удобрения: по новому фото или по фото последнего скана (сканер цветов сказал, что на нём удобрение).
 // Удобрение сразу сохраняется со своим графиком, а «Поставить в график» в приложении раздаёт его цветам.
-export async function fertForUser(uid, bytes = null, onStage = null) {
+// fertId — пересчитать уже сохранённое удобрение по его фото (под нынешние цветы и сезон), а с bytes — ещё и с доснятой стороной упаковки.
+export async function fertForUser(uid, bytes = null, onStage = null, fertId = null) {
   return logged(uid, async () => {
+    if (fertId) {
+      const row = await getFertilizer(uid, fertId);
+      if (!row) throw Object.assign(new Error('Нет такого удобрения'), { status: 400 });
+      const paths = fertPhotoPaths(row);
+      if (bytes && paths.length >= MAX_FERT_PHOTOS) throw Object.assign(new Error(`У этого удобрения уже ${paths.length} фото, больше не нужно.`), { status: 400 });
+      const old = (await Promise.all(paths.map((p) => downloadPhoto(p)))).filter(Boolean);
+      if (!old.length && !bytes) throw Object.assign(new Error('Фото удобрения потерялось, сфоткай упаковку ещё раз'), { status: 400 });
+      try { onStage?.(bytes ? 'Читаю новое фото вместе с прошлым и пересчитываю график…' : 'Перечитываю упаковку и пересчитываю график…'); } catch {}
+      const images = bytes ? [...old, bytes] : old;
+      const [plants, ferts] = await Promise.all([getPlants(uid), getFertilizers(uid)]);
+      const fert = await scanFertilizer(images, plants, Object.fromEntries(ferts.filter((f) => f.id !== fertId).map((f) => [f.id, f.name])), todayLocal() + 'T12:00:00Z');
+      await updateFertilizer(uid, row, fert, bytes);
+      return { fert: row, photos: images.length };
+    }
     const fromPending = !bytes;
     if (fromPending) {
       const p = (await getUser(uid))?.pending_scan;
@@ -351,7 +366,7 @@ export async function remind(user, evening, owners = []) {
       (plain.length ? (evening ? '🌙 <b>Ещё не политы:</b>\n' : '💧 <b>Сегодня пить хотят:</b>\n') + plain.map((p) => '• ' + html(p.name)).join('\n') : '') +
       (plain.length && fed.length ? '\n\n' : '') +
       (fed.length ? (evening ? '🌙 <b>Ещё не политы с удобрением:</b>\n' : '🧪 <b>Полить с удобрением:</b>\n') +
-        fed.map((p) => `• ${html(p.name)}: «${html(p.feed.name)}»${p.feed.dose ? ', ' + html(p.feed.dose) : ''}`).join('\n') : '');
+        fed.map((p) => `• ${html(p.name)}: «${html(p.feed.name)}»${p.feed.dose ? ', ' + html(p.feed.dose) : ''}${p.feed.amount ? ', вылить ' + html(p.feed.amount) : ''}`).join('\n') : '');
     await tg('sendMessage', {
       chat_id: user.chat_id, text, parse_mode: 'HTML',
       reply_markup: { inline_keyboard: [[
