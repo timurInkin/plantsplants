@@ -381,11 +381,14 @@ function app() {
     if (feedDue.length) {
       // Одно удобрение и одна доза у всех: пишем их один раз, а в строках — сколько вылить на каждый цветок.
       const mix = new Set(feedDue.map((p) => p.feed.fert + '|' + p.feed.dose)).size === 1 ? feedDue[0].feed : null;
-      h += '<section class="card feed"><div class="tag-row"><span class="tag">' + ms('compost') + 'Полив с удобрением</span><small>' +
+      // Устроена как плашка полива: счётчик, полоска по цветам, строки на белой подложке.
+      h += '<section class="card green water feed"><div class="tag-row"><span class="tag">' + ms('compost') + 'Полив с удобрением</span><small>' +
         (feedLeft ? 'разведи удобрение в воде для полива' : 'на сегодня всё') + '</small></div>' +
-        (mix && feedLeft ? '<p class="feed-mix"><b>«' + esc(mix.name) + '»</b>' + (mix.dose ? ' ' + esc(mix.dose) : '') + '</p>' : '') +
-        '<div class="rows">' + feedDue.map((p) => feedRow(p, !!mix && feedLeft)).join('') + '</div>' +
-        (feedLeft > 1 ? '<button class="pill" data-action="water-all" data-mode="feed"><span>Полила всех с удобрением</span><i>' + ms('done_all') + '</i></button>' : '') + '</section>';
+        '<div class="big">' + (feedDue.length - feedLeft) + '<span>/' + feedDue.length + '</span></div><div class="segs">' +
+        feedDue.map((p) => '<span class="' + (p.feed.fedToday ? 'on' : '') + '"></span>').join('') + '</div>' +
+        (mix ? '<p class="feed-mix"><b>«' + esc(mix.name) + '»</b>' + (mix.dose ? ' · ' + esc(mix.dose) : '') + '</p>' : '') +
+        '<div class="inner">' + feedDue.map((p) => feedRow(p, !!mix)).join('') + '</div>' +
+        (feedLeft > 1 ? '<button class="pill light" data-action="water-all" data-mode="feed"><span>Полила всех с удобрением</span><i>' + ms('done_all') + '</i></button>' : '') + '</section>';
     }
 
     if (care.length) {
