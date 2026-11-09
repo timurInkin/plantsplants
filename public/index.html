@@ -58,9 +58,10 @@ h3 { margin:0; font-size:19px; font-weight:500; letter-spacing:-.02em; }
 .circle.light { background:rgba(255,255,255,.14); border-color:rgba(255,255,255,.22); color:#fff; }
 .big { font-size:44px; font-weight:300; letter-spacing:-.04em; line-height:1; margin:4px 0 14px; }
 .big span { opacity:.55; font-size:26px; }
-.segs { display:flex; gap:3px; height:30px; border-radius:10px; overflow:hidden; margin-bottom:16px; }
-.segs span { flex:1; background:rgba(255,255,255,.16); transition:background .3s; }
-.segs span.on { background:rgba(255,255,255,.88); }
+/* Прогресс как в сторис: тонкие скруглённые полоски с зазорами, пройденные белые. */
+.segs { display:flex; gap:5px; height:8px; margin-bottom:16px; }
+.segs span { flex:1; border-radius:99px; background:rgba(255,255,255,.3); transition:background .3s; }
+.segs span.on { background:#fff; }
 .inner { background:var(--card); color:var(--text); border-radius:20px; padding:4px 10px; }
 .card.water { padding:14px 16px 16px 18px; }
 .tag-row { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
