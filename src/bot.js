@@ -363,7 +363,7 @@ export async function remind(user, evening, owners = []) {
     if (!due.length) continue;
     const plain = due.filter((p) => !p.feed?.due), fed = due.filter((p) => p.feed?.due);
     const text = (g.name ? `🪴 <b>Цветы: ${html(g.name)}</b>\n` : '') +
-      (plain.length ? (evening ? '🌙 <b>Ещё не политы:</b>\n' : '💧 <b>Сегодня пить хотят:</b>\n') + plain.map((p) => '• ' + html(p.name)).join('\n') : '') +
+      (plain.length ? (evening ? '🌙 <b>Ещё не политы:</b>\n' : '💧 <b>Сегодня пить хотят:</b>\n') + plain.map((p) => '• ' + html(p.name) + (p.scan?.waterPct ? ` — ≈${p.scan.waterPct}% горшка` : '')).join('\n') : '') +
       (plain.length && fed.length ? '\n\n' : '') +
       (fed.length ? (evening ? '🌙 <b>Ещё не политы с удобрением:</b>\n' : '🧪 <b>Полить с удобрением:</b>\n') +
         fed.map((p) => `• ${html(p.name)}: «${html(p.feed.name)}»${p.feed.dose ? ', ' + html(p.feed.dose) : ''}${p.feed.amount ? ', вылить ' + html(p.feed.amount) : ''}`).join('\n') : '');

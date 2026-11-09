@@ -9,6 +9,7 @@ import * as db from './db.js';
 import { setupTelegram, webhookSecret, userFromInitData, botUsername } from './telegram.js';
 import { track } from './timing.js';
 import { handleUpdate, remind, scanForUser, recheckForUser, fertForUser, notify } from './bot.js';
+import { fillWaterPct } from './water.js';
 
 const STATIC = {
   '/': ['index.html', 'text/html; charset=utf-8'],
@@ -274,4 +275,6 @@ if (process.env.NODE_ENV !== 'test') {
   server.listen(config.port, () => console.log('Слушаю порт', config.port));
   setupTelegram().catch((e) => console.error('Не удалось подключить Telegram:', e));
   setInterval(() => tick().catch((e) => console.error('Напоминалка не ушла:', e)), 60_000);
+  // Цветам, отсканированным раньше, досчитываем, сколько воды лить. Кому не досчиталось, попробуем при следующем запуске.
+  setTimeout(() => fillWaterPct().catch((e) => console.error('💧 Не посчитала, сколько воды лить:', e)), 15_000);
 }

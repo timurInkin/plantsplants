@@ -135,12 +135,15 @@ function app() {
     return '<span class="' + cls + (p.photo ? '' : ' empty') + '">' + (p.photo ? '<img src="' + photoUrl(p) + '" alt="" loading="lazy">' : ms('potted_plant')) + '</span>';
   }
 
+  // Сколько воды лить за полив, в % от объёма горшка (из скана).
+  const pct = (p) => (p.scan && p.scan.waterPct) || 0;
+
   function waterRow(p) {
     const w = when(p);
     return '<div class="row' + (p.wateredToday ? ' done' : '') + '">' +
       '<button class="hit" data-water="' + p.id + '">' + check(p.wateredToday) + '</button>' +
       '<button class="hit grow" data-open="' + p.id + '">' + pic(p, 'thumb') +
-      '<span class="txt"><b>' + esc(p.name) + '</b><small>раз в ' + days(p.every) + '</small></span>' + chip(w[0], w[1]) + '</button></div>';
+      '<span class="txt"><b>' + esc(p.name) + '</b><small>' + (pct(p) ? '≈' + pct(p) + '% горшка · ' : '') + ('раз в ' + days(p.every)).replace(/ /g, ' ') + '</small></span>' + chip(w[0], w[1]) + '</button></div>';
   }
 
   // mix — у всех цветов в плашке одно удобрение и одна доза: они написаны над строками, а в строке только сколько вылить.
@@ -256,12 +259,13 @@ function app() {
       '<h1>' + esc(dark) + (gray ? '<br><span>' + esc(gray) + '</span>' : '') + '</h1></section>';
   }
 
-  function scanFacts(s) {
+  // withPct — показать и сколько воды лить (на экране скана; в карточке цветка это есть в «Поливе»).
+  function scanFacts(s, withPct) {
     return '<ul class="facts">' +
       fact('eco', s.statusText || STATUS[s.status][0]) +
       (s.why ? fact('search', s.why) : '') +
       (s.pot !== 'unknown' ? fact('potted_plant', s.potText || POT[s.pot][0]) : '') +
-      fact('water_drop', 'раз в ' + days(s.every) + (s.waterText ? ', ' + lower(s.waterText) : '')) +
+      fact('water_drop', 'раз в ' + days(s.every) + (withPct && s.waterPct ? ', ≈' + s.waterPct + '% горшка' : '') + (s.waterText ? ', ' + lower(s.waterText) : '')) +
       (s.light ? fact('light_mode', s.light) : '') +
       (s.manual ? fact('edit', 'сорт указан вручную') : '') +
       (s.identified ? fact('biotech', (s.identified.disputed ? s.identified.source + ' думает иначе: ' : 'вид по ' + s.identified.source + ': ') + s.identified.latin + ', ' + Math.round(s.identified.score * 100) + '%') : '') + '</ul>';
@@ -456,6 +460,7 @@ function app() {
       '<button class="water-btn' + (p.wateredToday ? ' on' : '') + '" data-water="' + p.id + '">' + ms('water_drop') + (p.wateredToday ? 'Полито' : 'Полила') + '</button></div>' +
       (p.last ? '<button class="link-row" data-pickday="' + p.id + '">' + ms('event') + '<span>последний полив: ' + shortLabel(p.last) + '</span><b>' + (pickDay === p.id ? 'скрыть' : 'другой день') + '</b></button>' : '') +
       (!p.last || pickDay === p.id ? dayPicker(p) : '') +
+      (pct(p) ? '<ul class="facts feed-facts">' + fact('water_drop', '≈' + pct(p) + '% объёма горшка за полив') + '</ul>' + (s.waterPctWhy ? '<p class="feed-why">' + esc(s.waterPctWhy) + '</p>' : '') : '') +
       (own()
         ? '<div class="stepper"><span>Раз в</span><button class="circle" data-every="' + (p.every - 1) + '">' + ms('remove') + '</button><b>' + days(p.every) + '</b>' +
           '<button class="circle" data-every="' + (p.every + 1) + '">' + ms('add') + '</button></div>' +
@@ -542,7 +547,7 @@ function app() {
     } else {
       h += headline(s.name, s.latin) + varietyBlock('scan', s) + scanChips(s);
       if (s.confidence === 'low' && !s.manual) h += '<p class="note">Не до конца уверена, что это он. Можно сфоткать поближе.</p>';
-      h += '<section class="card">' + scanFacts(s) + '</section>' + todoCard(s);
+      h += '<section class="card">' + scanFacts(s, true) + '</section>' + todoCard(s);
     }
     if (slide === 0 && s.needPhotos && s.needPhotos.length) {
       h += '<section class="card"><div class="card-head"><div><h3>Чтобы ответить точнее</h3><p>' +
