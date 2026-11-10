@@ -163,6 +163,43 @@ export async function notify(uid, text, plantId = null) {
   }
 }
 
+const plural = (n, a, b, c) => { const m = n % 10, h = n % 100; return m === 1 && h !== 11 ? a : m >= 2 && m <= 4 && (h < 10 || h >= 20) ? b : c; };
+
+// Напоминалки этого дня: в каждой кнопка «Полила всех». Когда всё полито в приложении, кнопку убираем,
+// чтобы не отмечать второй раз в чате. Храним в памяти: после перезапуска сервера старые напоминалки просто останутся с кнопкой.
+const reminders = new Map();    // чьи цветы → [{ chat_id, message_id, day }]
+const allWateredOn = new Map(); // чьи цветы → день, когда уже написали «Все политы»
+
+function rememberReminder(gid, chat_id, message_id, day) {
+  reminders.set(gid, [...(reminders.get(gid) || []).filter((r) => r.day === day), { chat_id, message_id, day }]);
+}
+
+async function closeReminders(gid, day) {
+  const list = (reminders.get(gid) || []).filter((r) => r.day === day);
+  reminders.delete(gid);
+  await Promise.all(list.map((r) => tg('editMessageText', { chat_id: r.chat_id, message_id: r.message_id, text: 'Все политы 💧' }).catch(() => {})));
+}
+
+// Сколько ещё не полито из того, что сегодня надо. Как на экране «Сегодня»: полив с удобрением готов, когда отмечена подкормка.
+const leftToday = (s) => s.plants.filter((p) => (p.dueIn <= 0 || p.wateredToday) && !p.feed?.fedToday && (p.feed?.due || !p.wateredToday)).length;
+
+// В приложении отметили полив. Если этим отметили последнего, кого сегодня пора было поливать, пишем в чат «Все политы»
+// (раз в день) и убираем кнопку «Полила всех» из напоминалок. before и after — цветы до отметки и после.
+export async function wateredInApp(uid, gid, before, after) {
+  try {
+    if (!leftToday(before) || leftToday(after) || allWateredOn.get(gid) === after.today) return;
+    allWateredOn.set(gid, after.today);
+    await closeReminders(gid, after.today);
+    const name = gid === uid ? null : (await gardensOf(uid)).find((g) => g.id === gid)?.name;
+    const next = after.plants.filter((p) => p.dueIn > 0 && !p.wateredToday).sort((a, b) => a.dueIn - b.dueIn)[0];
+    const same = next ? after.plants.filter((p) => p.dueIn === next.dueIn && !p.wateredToday).length : 0;
+    await notify(uid, (name ? `💧 Цветы ${html(name)}: все политы, на сегодня всё.` : '💧 Все политы, на сегодня всё.') +
+      (next ? `\nДальше ${html(next.name)}${same > 1 ? ` и ещё ${same - 1}` : ''}, ${next.dueIn === 1 ? 'завтра' : `через ${next.dueIn} ${plural(next.dueIn, 'день', 'дня', 'дней')}`}.` : ''));
+  } catch (e) {
+    console.error('Не получилось написать «Все политы»', e.message);
+  }
+}
+
 // Кнопки «Когда был последний полив?»: сегодня, вчера и ещё пять дней назад.
 function lastWateringKeyboard(plantId) {
   const today = todayLocal();
@@ -214,9 +251,14 @@ async function handleCallback(cb) {
     if (cb.data === 'w:all' || cb.data.startsWith('w:all:')) {
       const garden = Number(cb.data.slice(6)) || uid;
       if (garden !== uid && !(await gardensOf(uid)).some((g) => g.id === garden)) throw new Error('Доступ к этим цветам закрыли');
-      const n = await waterAllDue(garden, todayLocal());
+      const today = todayLocal();
+      const n = await waterAllDue(garden, today);
       await answer(n ? 'Отметила 💧' : 'Уже всё полито');
       await tg('editMessageText', { chat_id, message_id, text: 'Все политы 💧' });
+      // Остальные напоминалки про эти цветы (у хозяина и у тех, кому их доверили) тоже закрываем, а приложение больше не пишет «Все политы».
+      allWateredOn.set(garden, today);
+      reminders.set(garden, (reminders.get(garden) || []).filter((r) => !(r.chat_id === chat_id && r.message_id === message_id)));
+      await closeReminders(garden, today);
     } else if (cb.data.startsWith('sc?:')) {
       // Сохранить в цветок, который на скан не похож: сначала переспрашиваем.
       const id = cb.data.slice(4);
@@ -367,12 +409,13 @@ export async function remind(user, evening, owners = []) {
       (plain.length && fed.length ? '\n\n' : '') +
       (fed.length ? (evening ? '🌙 <b>Ещё не политы с удобрением:</b>\n' : '🧪 <b>Полить с удобрением:</b>\n') +
         fed.map((p) => `• ${html(p.name)}: «${html(p.feed.name)}»${p.feed.dose ? ', ' + html(p.feed.dose) : ''}${p.feed.amount ? ', вылить ' + html(p.feed.amount) : ''}`).join('\n') : '');
-    await tg('sendMessage', {
+    const sent = await tg('sendMessage', {
       chat_id: user.chat_id, text, parse_mode: 'HTML',
       reply_markup: { inline_keyboard: [[
         g.name ? { text: 'Все политы ✓', callback_data: 'w:all:' + g.id } : { text: 'Полила всех', callback_data: 'w:all' },
         appButton('Открыть', g.name ? `g=${g.id}/today` : 'today'),
       ]] },
     });
+    if (sent?.result?.message_id) rememberReminder(g.id, user.chat_id, sent.result.message_id, state.today);
   }
 }

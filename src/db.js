@@ -123,8 +123,9 @@ export async function setLastWatering(plantId, day) {
 }
 
 // mode: 'plain' — только обычный полив, 'feed' — только те, кого сегодня поливать с удобрением (им отмечаем и подкормку), 'all' — все.
-export async function waterAllDue(uid, day, mode = 'all') {
-  const state = await buildState(uid);
+// state — цветы, если их уже прочитали.
+export async function waterAllDue(uid, day, mode = 'all', state = null) {
+  state ||= await buildState(uid);
   const feedNow = (p) => !!p.feed?.due;
   const due = mode === 'feed'
     ? state.plants.filter((p) => (p.dueIn <= 0 || p.wateredToday) && feedNow(p))

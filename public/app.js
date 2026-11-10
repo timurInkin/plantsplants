@@ -57,6 +57,8 @@ function app() {
   let pickDay = null;       // у какого цветка открыт выбор дня последнего полива
   const plantSlides = {};   // какое фото открыто в галерее карточки цветка: { id: номер }
   let done = null;          // экран «Готово»: { title, sub, text, photo, icon, plant, next: [экран, надпись] }
+  // Куда ведёт «назад» из карточки цветка: на экран, с которого её открыли (и на то же место в нём). По прямой ссылке — в «Цветы».
+  let plantBack = null;     // { route, y }
   // Порядок в «Цветах»: сначала новые, сначала старые или по алфавиту. Помним на телефоне.
   const SORTS = [['new', 'Сначала новые'], ['old', 'Сначала старые'], ['abc', 'По алфавиту']];
   let plantSort = 'new';
@@ -440,7 +442,7 @@ function app() {
     if (!p) return viewPlants();
     const s = p.scan;
     const w = when(p);
-    let h = '<div class="topbar"><button class="circle" data-go="plants">' + ms('arrow_back') + '</button></div>';
+    let h = '<div class="topbar"><button class="circle" data-action="plant-back">' + ms('arrow_back') + '</button></div>';
     // Доснятые фото листаются вбок. Под каждым его разбор, под первым — вся карточка.
     const det = s && s.details && p.photo ? s.details : [];
     if (det.length) {
@@ -614,7 +616,9 @@ function app() {
       root.innerHTML = '<div class="loading">' + (error ? esc(error) : '<span class="spinner"></span>') + '</div>';
       return;
     }
-    const tab = route === 'ferts' || route.startsWith('fert/') ? 'ferts' : route === 'done' ? (done && done.tab) || 'plants' : route.startsWith('plant/') || route === 'share' ? 'plants' : route;
+    // Карточка цветка подсвечивает вкладку, из которой её открыли.
+    const at = route.startsWith('plant/') ? backRoute() : route;
+    const tab = at === 'ferts' || at.startsWith('fert/') ? 'ferts' : at === 'done' ? (done && done.tab) || 'plants' : at === 'share' ? 'plants' : at;
     let view;
     if (route.startsWith('plant/')) view = viewPlant(route.slice(6));
     else if (route === 'plants') view = viewPlants();
@@ -683,6 +687,10 @@ function app() {
     for (const at of Array.from(to.attributes)) if (from.getAttribute(at.name) !== at.value) from.setAttribute(at.name, at.value);
     if (from.nodeName === 'INPUT' && from.value !== to.value) from.value = to.value;
     morphChildren(from, to);
+  }
+
+  function backRoute() {
+    return plantBack && byId(route.slice(6)) ? plantBack.route : 'plants';
   }
 
   function go(r) {
@@ -904,7 +912,18 @@ function app() {
     if (!b) return;
     const d = b.dataset;
     if (d.go) return go(d.go);
-    if (d.open) { delete plantSlides[d.open]; return go('plant/' + d.open); }
+    if (d.open) {
+      delete plantSlides[d.open];
+      // Запоминаем, откуда открыли: «Сегодня», «Цветы», удобрение. С экранов «Готово» и «Скан» назад ведём в «Цветы».
+      if (!route.startsWith('plant/')) plantBack = route === 'today' || route === 'plants' || route === 'ferts' || route.startsWith('fert/') ? { route, y: window.scrollY } : null;
+      return go('plant/' + d.open);
+    }
+    if (d.action === 'plant-back') {
+      const r = backRoute(), y = plantBack && plantBack.route === r ? plantBack.y : 0;
+      plantBack = null;
+      go(r);
+      return window.scrollTo(0, y);
+    }
     if (d.slideTo) return showSlide(d.gallery, Number(d.slideTo), true);
     if (d.unshot) {
       if (!confirm('Убрать это фото и его разбор?')) return;

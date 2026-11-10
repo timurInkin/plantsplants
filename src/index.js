@@ -8,7 +8,7 @@ import { todayLocal, hourLocal, validDay } from './dates.js';
 import * as db from './db.js';
 import { setupTelegram, webhookSecret, userFromInitData, botUsername } from './telegram.js';
 import { track } from './timing.js';
-import { handleUpdate, remind, scanForUser, recheckForUser, fertForUser, notify } from './bot.js';
+import { handleUpdate, remind, scanForUser, recheckForUser, fertForUser, notify, wateredInApp } from './bot.js';
 import { fillWaterPct } from './water.js';
 
 const STATIC = {
@@ -130,8 +130,11 @@ async function api(uid, path, req) {
     return { ...(await db.buildState(uid)), saved: plant.id, isNew };
   }
   if (path === '/api/water-all') {
-    await db.waterAllDue(g, today, ['plain', 'feed'].includes(body.mode) ? body.mode : 'all');
-    return db.buildState(g);
+    const before = await db.buildState(g);
+    await db.waterAllDue(g, today, ['plain', 'feed'].includes(body.mode) ? body.mode : 'all', before);
+    const after = await db.buildState(g);
+    wateredInApp(uid, g, before, after); // если теперь всё полито, бот напишет об этом в чат
+    return after;
   }
 
   // Пересчитать удобрение по его фото: например, чтобы появилось, сколько лить, или весной под новый сезон.
@@ -168,7 +171,10 @@ async function api(uid, path, req) {
     return { ok: true };
   }
 
-  const plant = await db.getPlant(g, body.plant);
+  // Для отметок полива читаем цветы и до отметки: чтобы понять, что отметили последнего и пора написать в чат «Все политы».
+  // «Последний полив» считается, только если это сегодня: перенос на вчера не значит, что цветы полили.
+  const watering = path === '/api/water' || (path === '/api/water/last' && body.day === today);
+  const [plant, before] = await Promise.all([db.getPlant(g, body.plant), watering ? db.buildState(g) : null]);
   if (!plant) throw fail('Нет такого цветка');
 
   if (path === '/api/water') {
@@ -203,7 +209,9 @@ async function api(uid, path, req) {
   } else {
     return null;
   }
-  return db.buildState(g);
+  const after = await db.buildState(g);
+  if (before) wateredInApp(uid, g, before, after);
+  return after;
 }
 
 // Подпись для строчки «⏱» в логах: что пришло из чата.
